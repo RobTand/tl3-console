@@ -1,12 +1,15 @@
 //! The console's HTTP API types. The web app's TypeScript types are generated
 //! from these and the board's, so the two can't drift.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tl3_controller::{
     board::{
         Badge, Board, BoardPatch, Card, CardIncident, Column, ColumnCount, Ending, Flow, Retries,
     },
-    console::{AnswerKind, CardQuestion, Detail, QuestionOption},
+    console::{
+        Action, AnswerKind, CardQuestion, Choice, CommandRecord, CommandStatus, Detail,
+        QuestionOption,
+    },
 };
 use ts_rs::TS;
 
@@ -22,6 +25,28 @@ pub struct DatabaseStatus {
 pub struct PatchEvent {
     pub base: String,
     pub patch: BoardPatch,
+}
+
+/// `POST /api/requests/{id}/commands`.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct CommandRequest {
+    /// A lowercase UUID the browser chooses; resending it files nothing more.
+    pub id: String,
+    pub action: Action,
+}
+
+/// The answer to a command: filed for tl3d, or already filed under this id.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+pub struct Filed {
+    pub id: String,
+    pub filed: bool,
+}
+
+/// The stream's `commands` event: the newest filed commands and how each settled.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+pub struct CommandsEvent {
+    pub commands: Vec<CommandRecord>,
 }
 
 /// The generated `web/src/api/types.gen.ts`.
@@ -47,6 +72,13 @@ pub fn typescript() -> String {
         (QuestionOption::docs(), QuestionOption::decl(&config)),
         (AnswerKind::docs(), AnswerKind::decl(&config)),
         (Detail::docs(), Detail::decl(&config)),
+        (Action::docs(), Action::decl(&config)),
+        (Choice::docs(), Choice::decl(&config)),
+        (CommandRequest::docs(), CommandRequest::decl(&config)),
+        (Filed::docs(), Filed::decl(&config)),
+        (CommandStatus::docs(), CommandStatus::decl(&config)),
+        (CommandRecord::docs(), CommandRecord::decl(&config)),
+        (CommandsEvent::docs(), CommandsEvent::decl(&config)),
     ] {
         output.push('\n');
         output.push_str(&docs.unwrap_or_default());

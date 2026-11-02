@@ -109,3 +109,40 @@ export type AnswerKind = "continue" | "stop" | "retry" | "mark_handled" | "try_a
  * What an option needs from Rob before it can apply.
  */
 export type Detail = "text" | "guidance" | "amount";
+
+export type Action = { "kind": "pause", } | { "kind": "resume", } | { "kind": "stop", } | { "kind": "restart", } | { "kind": "clear_incident", incident: string, } | { "kind": "answer", question: number, choice: Choice, } | { "kind": "defer", question: number, } | { "kind": "comment", text: string, };
+
+/**
+ * One of a question's options, with the details it needs from Rob.
+ */
+export type Choice = { "answer": "continue", } | { "answer": "stop", } | { "answer": "retry", } | { "answer": "mark_handled", } | { "answer": "try_again", guidance: string, } | { "answer": "add_credit", amount: number, } | { "answer": "change_request", text: string, };
+
+/**
+ * `POST /api/requests/{id}/commands`.
+ */
+export type CommandRequest = { 
+/**
+ * A lowercase UUID the browser chooses; resending it files nothing more.
+ */
+id: string, action: Action, };
+
+/**
+ * The answer to a command: filed for tl3d, or already filed under this id.
+ */
+export type Filed = { id: string, filed: boolean, };
+
+export type CommandStatus = "pending" | "applied" | "refused";
+
+/**
+ * A filed command and how it settled.
+ */
+export type CommandRecord = { id: string, node: number, 
+/**
+ * None when the stored action isn't one this console knows.
+ */
+action: Action | null, status: CommandStatus, reason: string | null, received_ms: number, settled_ms: number | null, };
+
+/**
+ * The stream's `commands` event: the newest filed commands and how each settled.
+ */
+export type CommandsEvent = { commands: Array<CommandRecord>, };

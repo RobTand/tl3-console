@@ -5,6 +5,7 @@
 #![forbid(unsafe_code)]
 
 pub mod api;
+mod commands;
 mod feed;
 mod rebuild;
 mod server;

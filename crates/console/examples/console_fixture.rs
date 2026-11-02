@@ -3,7 +3,9 @@
 //!
 //! Prints `{"url": ...}` once serving. Each `advance` line on stdin drives the
 //! controller until request #42 changes column and prints `{"column": ...}`.
-//! Closing stdin stops Postgres and exits.
+//! Each `apply` line applies the console commands filed so far, as tl3d does
+//! when the console wakes it, and prints `{"applied": true}`. Request #43
+//! waits in Needs Rob with a question. Closing stdin stops Postgres and exits.
 
 #[path = "../tests/support/mod.rs"]
 mod support;
@@ -13,7 +15,7 @@ use std::{io::BufRead, net::TcpListener, path::PathBuf};
 use tl3_controller::{
     Bootstrap, Controller, LabelledIssue, Repository, adapters,
     board::{self, Column},
-    executor::Observation,
+    executor::{Completion, Delivery, Executor, Look, Observation, Reconciliation, Upstream},
 };
 use tl3_kernel::{Command, Event, NodeId};
 use tl3_store::{Reader, Store};
@@ -56,9 +58,14 @@ fn main() {
     let mut database = support::Database::start();
     let settings = database.create("console_fixture");
     let records = tempfile::tempdir().unwrap();
+    let mut registry = adapters::simulation(records.path()).unwrap();
+    registry.register(
+        Upstream::Workers,
+        NeedsRob(adapters::workers::Fake::new(records.path())),
+    );
     let mut controller = Controller::open(
         Store::open(&settings).unwrap(),
-        adapters::simulation(records.path()).unwrap(),
+        registry,
         Bootstrap {
             operations: None,
             repos: REPOS
@@ -94,6 +101,16 @@ fn main() {
     controller
         .intake(issue(
             "tl3-sandbox",
+            43,
+            "Mirror the wheel cache to the Sparks",
+        ))
+        .unwrap();
+    while column(&settings, "tl3-sandbox", 43) != Column::NeedsRob
+        && controller.drive_once().unwrap()
+    {}
+    controller
+        .intake(issue(
+            "tl3-sandbox",
             42,
             "Add a live board to the operator console",
         ))
@@ -116,7 +133,13 @@ fn main() {
         json!({"url": format!("http://{}", console.address())})
     );
     for line in std::io::stdin().lock().lines() {
-        if line.unwrap().trim() != "advance" {
+        let line = line.unwrap();
+        if line.trim() == "apply" {
+            tl3_controller::ingress::drain(&mut controller).unwrap();
+            println!("{}", json!({ "applied": true }));
+            continue;
+        }
+        if line.trim() != "advance" {
             continue;
         }
         let before = column(&settings, "tl3-sandbox", 42);
@@ -155,4 +178,23 @@ fn column(settings: &tl3_config::Store, repo: &str, issue: u64) -> Column {
         .find(|card| card.issue == issue && card.repo == repo)
         .map(|card| card.column)
         .unwrap()
+}
+
+/// The simulated workers, except that request #43's first run fails for good,
+/// so it waits in Needs Rob with a question.
+struct NeedsRob(adapters::workers::Fake);
+
+impl Executor for NeedsRob {
+    fn execute(&mut self, delivery: &Delivery) -> tl3_controller::Result<Completion> {
+        if delivery.issue == 43 {
+            return Ok(Completion::permanent("fixture"));
+        }
+        self.0.execute(delivery)
+    }
+    fn reconcile(&mut self, delivery: &Delivery) -> tl3_controller::Result<Reconciliation> {
+        self.0.reconcile(delivery)
+    }
+    fn look(&mut self, delivery: &Delivery) -> tl3_controller::Result<Look> {
+        self.0.look(delivery)
+    }
 }
