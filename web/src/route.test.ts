@@ -17,3 +17,7 @@ describe("routes", () => {
     }
   });
 });
+
+it("opens the postmortems page", () => {
+  expect(parseRoute("#/postmortems")).toEqual({ page: "postmortems" });
+});

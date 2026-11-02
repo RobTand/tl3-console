@@ -15,6 +15,10 @@ use tl3_store::{Reader, Store};
 const ROLE: &str = "tl3_console_reader";
 
 fn main() {
+    if std::env::args().any(|arg| arg == "--postmortems") {
+        postmortem_scenarios();
+        return;
+    }
     let mut database = Database::start();
     let settings = database.create("console");
     let records = tempfile::tempdir().unwrap();
@@ -422,6 +426,9 @@ impl EventStream {
             let event = self.event();
             if event.name == "database" {
                 self.last_database = Some(event.data);
+                continue;
+            }
+            if event.name == "postmortems" {
                 continue;
             }
             if event.name == "commands" {
@@ -1722,4 +1729,142 @@ fn prompts_edit_and_revert_through_the_api(assets: &Path) -> Database {
         .execute("DELETE FROM tl3_schema_migrations WHERE version = 999", &[])
         .unwrap();
     database
+}
+
+fn postmortem_scenarios() {
+    let mut database = Database::start();
+    let settings = database.create("postmortems");
+    let records = tempfile::tempdir().unwrap();
+    let mut controller = open(&settings, records.path());
+    controller.intake(issue(337)).unwrap();
+    let mut admin = raw(&settings);
+    admin.batch_execute(r#"INSERT INTO tl3_postmortems(node_id, trigger, reason, sample_share, repo, issue, title, revision, owed_at, status, cause, summary)
+        SELECT '0', 'close', 'sampled', 0.1, 'RobTand/tl3-sandbox', 337, 'Retry after disconnect', min(revision), '2026-11-01T00:00:00Z', 'done', 'outside', 'Network unavailable' FROM tl3_events;
+        INSERT INTO tl3_postmortems(node_id, trigger, reason, repo, issue, title, revision, owed_at)
+        SELECT '0', 'question:7', 'escalation', 'RobTand/tl3-sandbox', 337, 'Needs Rob', min(revision), '2026-11-02T00:00:00Z' FROM tl3_events;
+        INSERT INTO tl3_postmortems(node_id, trigger, reason, repo, issue, title, revision, owed_at)
+        SELECT '9', 'close', 'needed_fix', 'RobTand/private', 99, 'Secret hidden title', min(revision), '2026-11-02T00:00:00Z' FROM tl3_events;
+        INSERT INTO tl3_postmortem_recommendations(postmortem_id, fingerprint, rank, phase, kind, target, operation, before, after, evidence, effect)
+        SELECT id, 'rec-0123456789abcdef', 1, 'making', 'prompt', 'Retry connection', 'add', '', 'Wait for recovery', 'socket disconnected', 'Recover automatically' FROM tl3_postmortems;
+        INSERT INTO tl3_code_grades(node_id, trigger, rubric_version, dimension, grade, fact, revision, recorded_at)
+        SELECT '0', 'close', 1, 'reliability', 4, '{"fix_rounds":1}', min(revision), clock_timestamp() FROM tl3_events;"#).unwrap();
+    let config = tl3_config::Config::parse(include_str!("fixtures/tl3-example.toml")).unwrap();
+    let hidden = HiddenRepos::new(&["RobTand/tl3-sandbox".into()], &config.github.repos).unwrap();
+    tl3_store::grant_reader(
+        &settings,
+        "postmortem_reader",
+        settings.password_file.as_deref().unwrap(),
+    )
+    .unwrap();
+    let assets = tempfile::tempdir().unwrap();
+    let start = |hidden| {
+        tl3_console::start(
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            tl3_console::Options {
+                store: tl3_config::Store {
+                    user: "postmortem_reader".into(),
+                    ..settings.clone()
+                },
+                assets: assets.path().into(),
+                models: None,
+                links: Default::default(),
+                public_hosts: vec![],
+                hidden,
+            },
+        )
+        .unwrap()
+    };
+    let console = start(Default::default());
+    let concealed = start(hidden);
+    let address = console.address();
+    let json = |path: &str| {
+        let (status, _, body) = get(address, path);
+        assert_eq!(status, 200, "{path}: {}", String::from_utf8_lossy(&body));
+        serde_json::from_slice::<Value>(&body).unwrap()
+    };
+    let tests: Vec<(&str, Box<dyn FnMut() + '_>)> = vec![
+        (
+            "postmortems_request_all_triggers_and_grades",
+            Box::new(|| {
+                let result = json("/api/requests/0/postmortems");
+                assert_eq!(result["postmortems"][0]["trigger"], "question:7");
+                assert_eq!(result["postmortems"][1]["sample_share"], 0.1);
+                assert_eq!(result["postmortems"][1]["cause"], "outside");
+                assert_eq!(result["grades"][0]["grade"], 4);
+                assert_eq!(result["grades"][0]["fact"]["fix_rounds"], 1);
+                assert_eq!(get(address, "/api/requests/999/postmortems").0, 404);
+            }),
+        ),
+        (
+            "postmortems_search_filters_and_keyset_paging",
+            Box::new(|| {
+                let result = json(
+                    "/api/postmortems?q=disconnected&repo=RobTand%2Ftl3-sandbox&cause=outside&reason=sampled&status=done&from=2026-11-01&to=2026-11-02&limit=1",
+                );
+                assert_eq!(result["postmortems"].as_array().unwrap().len(), 1);
+                assert_eq!(result["postmortems"][0]["trigger"], "close");
+                assert_eq!(result["postmortems"][0]["recommendations"][0]["seen_in"], 3);
+                let first = json("/api/postmortems?limit=1");
+                let next = first["next_before"].as_i64().expect("another page");
+                assert!(
+                    json(&format!("/api/postmortems?before={next}&limit=1"))["postmortems"][0]["id"]
+                        .as_i64() < Some(next)
+                );
+                for query in [
+                    "limit=101",
+                    "status=bogus",
+                    "from=2026-02-30",
+                    "from=2026-11-03&to=2026-11-01",
+                ] {
+                    assert_eq!(get(address, &format!("/api/postmortems?{query}")).0, 400);
+                }
+            }),
+        ),
+        (
+            "postmortems_hidden_repos_and_counts",
+            Box::new(|| {
+                let hidden_address = concealed.address();
+                assert_eq!(get(hidden_address, "/api/requests/0/postmortems").0, 404);
+                let (status, _, body) = get(hidden_address, "/api/postmortems");
+                assert_eq!(status, 200);
+                let result: Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(result["postmortems"].as_array().unwrap().len(), 1);
+                assert_eq!(result["postmortems"][0]["recommendations"][0]["seen_in"], 1);
+                assert_eq!(get(hidden_address, "/api/postmortems/0").0, 404);
+                let response =
+                    request(address, "GET", "/api/postmortems", Some("evil.example"), "");
+                assert_eq!(response.0, 421);
+            }),
+        ),
+        (
+            "postmortems_three_tables_refresh_stream_without_world_change",
+            Box::new(|| {
+                assert_eq!(get(address, "/api/requests/0/postmortems").0, 200);
+                let mut stream = EventStream::open(address, None);
+                stream.board_event();
+                // Each connection sends an invalidation, so reconnects refresh an open page.
+                while stream.event().name != "postmortems" {}
+                for sql in [
+                    "UPDATE tl3_postmortems SET notes = 'Changed' WHERE node_id = '0'",
+                    "UPDATE tl3_postmortem_recommendations SET evidence = 'new evidence'",
+                    "INSERT INTO tl3_code_grades(node_id, trigger, rubric_version, dimension, fact, revision, recorded_at) SELECT '0', 'close', 1, 'credit', '{}', min(revision), clock_timestamp() FROM tl3_events",
+                ] {
+                    admin.batch_execute(sql).unwrap();
+                    let event = stream.event();
+                    assert_eq!(event.name, "postmortems", "{event:?}");
+                }
+            }),
+        ),
+    ];
+    let mut failed = 0;
+    for (name, mut test) in tests {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(&mut test));
+        println!(
+            "test {name} ... {}",
+            if result.is_ok() { "ok" } else { "FAILED" }
+        );
+        failed += usize::from(result.is_err());
+    }
+    database.stop();
+    assert_eq!(failed, 0, "postmortem scenarios failed");
 }
