@@ -43,11 +43,11 @@ export type CardIncident = { id: string, summary: string, };
 /**
  * A workflow stage on the board, in board order.
  */
-export type Column = "Backlog" | "Intake" | "Planning" | "Making" | "Checking" | "Reviewing" | "Merging" | "NeedsRob" | "Done";
+export type Column = "Backlog" | "Intake" | "Planning" | "Making" | "Checking" | "Reviewing" | "Merging" | "NeedsRob" | "Done" | "Cancelled";
 
 export type ColumnCount = { column: Column, label: string, count: number, };
 
-export type Badge = "Paused" | "Incident" | "MakerBlocked" | "NeedsRob" | "WaitingForCapacity";
+export type Badge = "Paused" | "Incident" | "MakerBlocked" | "NeedsRob" | "WaitingForCapacity" | "Stopped";
 
 /**
  * How a request ended, or is ending while it cleans up.

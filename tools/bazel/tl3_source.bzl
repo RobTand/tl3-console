@@ -45,13 +45,17 @@ def _tl3_source_impl(ctx):
     ctx.file("REPO.bazel", "")
     ctx.file("BUILD.bazel", """filegroup(
     name = "worker_schemas",
-    srcs = glob(["workers/src/tl3_workers/schemas/*.json"]),
+    srcs = glob([
+        "workers/src/tl3_workers/schemas/*.json",
+        "workers/src/tl3_workers/prompts/*.md",
+    ]),
     visibility = ["//visibility:public"],
 )
 """)
     ctx.file("crates/controller/BUILD.bazel", """load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
 
-# build.rs writes include_str! paths under CARGO_MANIFEST_DIR/../../workers.
+# build.rs writes include_str! paths for the schemas and copies the built-in
+# prompts under CARGO_MANIFEST_DIR/../../workers.
 # Its build and the library's compile both get these files at their exec-root
 # paths; the manifest makes crates/controller a directory, so ".." resolves.
 # BuildBuddy runs every action in one fixed exec root, so the paths agree.

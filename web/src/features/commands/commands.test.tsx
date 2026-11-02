@@ -125,7 +125,7 @@ describe("CardCommands", () => {
   });
 
   it("offers only restart on a stopped request", () => {
-    setup(<CardCommands card={card({ id: 4, column: "Done", ending: "Stopped" })} />);
+    setup(<CardCommands card={card({ id: 4, column: "Backlog", ending: "Stopped", badges: ["Stopped"] })} />);
     expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Restart"]);
   });
 
@@ -272,6 +272,20 @@ describe("focus", () => {
 });
 
 describe("compact cards", () => {
+  it("restart a stopped backlog request from the ⋯ menu", async () => {
+    const user = userEvent.setup();
+    const { filed } = setup(
+      <CardCommands compact card={card({ id: 4, column: "Backlog", ending: "Stopped", badges: ["Stopped"] })} />,
+    );
+    screen.getByRole("button", { name: "Actions" }).focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Restart"]);
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm restart" })).toHaveFocus());
+    await user.keyboard("{Enter}");
+    expect(filed.map((command) => command.action)).toEqual([{ kind: "restart" }]);
+  });
+
   it("keep their actions behind one menu that works from the keyboard", async () => {
     const user = userEvent.setup();
     const { filed } = setup(
