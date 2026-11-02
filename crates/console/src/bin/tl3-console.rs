@@ -23,8 +23,16 @@ fn run() -> tl3_console::Result<()> {
     let settings = Settings::load(path)?;
     if check {
         // Deploy runs this with the new binary before it replaces the old one.
-        let _ = tl3_console::check(&settings.store)?;
-        println!("Console config loads and the store's schema matches the pinned TL3");
+        let extra = tl3_console::check(&settings.store)?;
+        if extra.is_empty() {
+            println!("Console config loads and the store's schema matches the pinned TL3");
+        } else {
+            println!("Console config loads and the store's schema is ahead of the pinned TL3");
+            eprintln!(
+                "tl3-console: warning: {}",
+                tl3_console::schema::warning(&extra)
+            );
+        }
         return Ok(());
     }
     let listener = std::net::TcpListener::bind(settings.listen)?;
