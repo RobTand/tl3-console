@@ -25,7 +25,7 @@ export function run(fields: Partial<WorkerRun> & { key: string }): WorkerRun {
 export function caseFile(fields: Partial<CaseFile> = {}): CaseFile {
   return {
     revision: 40,
-    card: card({ id: 1, issue: 102, title: "Cache compiled kernels between campaign rows", round: 2 }),
+    card: card({ id: 1, issue: 102, title: "Cache compiled kernels between campaign rows", round: 1 }),
     timeline: [
       { revision: 3, at_ms: T0, column: "Intake", step: "Reader started", cause: "Rob labelled the issue" },
       { revision: 9, at_ms: T0 + 4 * MINUTE, column: "Planning", step: "Planner started", cause: "The auditor agreed" },
@@ -33,7 +33,7 @@ export function caseFile(fields: Partial<CaseFile> = {}): CaseFile {
     ],
     children: [],
     runs: [
-      run({ key: "effect:1:4", role: "Maker", status: "Failed", outcome: "Blocked by the environment", round: 1 }),
+      run({ key: "effect:1:4", role: "Maker", status: "Failed", outcome: "Blocked by the environment", round: 0 }),
       run({
         key: "effect:1:9",
         role: "Reviewer",
@@ -42,7 +42,7 @@ export function caseFile(fields: Partial<CaseFile> = {}): CaseFile {
         outcome: "Changes requested",
         trace_url: null,
       }),
-      run({ key: "effect:1:12", role: "Maker", status: "Running", ended_ms: null, outcome: "Running", round: 2 }),
+      run({ key: "effect:1:12", role: "Maker", status: "Running", ended_ms: null, outcome: "Running", round: 1 }),
     ],
     incidents: [
       {

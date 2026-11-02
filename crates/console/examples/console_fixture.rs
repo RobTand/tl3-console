@@ -19,7 +19,7 @@ use tl3_controller::{
     board::{self, Column},
     executor::{Completion, Delivery, Executor, Observation, Output, Reconciliation, Upstream},
 };
-use tl3_kernel::{Command, EffectKind, Event, Fact, NodeId, Phase, Reply, Role};
+use tl3_kernel::{Command, EffectKind, Event, Fact, NodeId, Reply, Role};
 use tl3_store::{Reader, Store};
 
 const REPOS: [&str; 4] = ["tl3-sandbox", "prismabuild", "prismaquant", "tessera"];
@@ -166,7 +166,7 @@ fn main() {
                     .unwrap();
             }
             let done = if index as u64 == FIX_ROUND {
-                node.round >= 2 && node.phase == Phase::Making
+                node.round >= 1 && Column::of(node.phase) == Column::Making
             } else {
                 column(&settings, repo, number) >= target
             };

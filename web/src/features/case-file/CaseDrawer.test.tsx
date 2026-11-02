@@ -28,7 +28,7 @@ describe("CaseFileView", () => {
           card: card({
             id: 1,
             attempt: 2,
-            round: 3,
+            round: 1,
             credit: 1,
             retries: { plan: 1, audit: 2, run_failures: 4, effect_failures: 5 },
           }),
@@ -38,7 +38,7 @@ describe("CaseFileView", () => {
     const counters = section("Counters");
     for (const [term, value] of [
       ["Attempt", "2"],
-      ["Fix rounds", "2"],
+      ["Fix rounds", "1"],
       ["Plan retries", "1"],
       ["Audit rounds", "2"],
       ["Run failures", "4"],

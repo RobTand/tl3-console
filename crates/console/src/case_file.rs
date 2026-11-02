@@ -602,9 +602,12 @@ fn runs(
         if !ended && card.role.as_deref() == Some(label) {
             model = model.or_else(|| card.model.clone());
         }
+        // Makers move one rung down their ladder per attempt.
+        let rung =
+            (role == Role::Make).then(|| usize::from(effect.delivery.attempt.saturating_sub(1)));
         let effort = model
             .as_deref()
-            .and_then(|model| effort(models, name, model));
+            .and_then(|model| effort(models, name, model, rung));
         runs.push(WorkerRun {
             key: effect.key.clone(),
             role: label.into(),
@@ -685,8 +688,14 @@ fn reply_outcome_of(reply: Reply) -> &'static str {
     }
 }
 
-/// The configured effort of a model in a role's ladder.
-fn effort(models: Option<&tl3_config::Models>, role: &str, model: &str) -> Option<String> {
+/// The configured effort of a model in a role's ladder: the run's own rung
+/// when it names that model, otherwise the model's first rung.
+fn effort(
+    models: Option<&tl3_config::Models>,
+    role: &str,
+    model: &str,
+    rung: Option<usize>,
+) -> Option<String> {
     let models = models?;
     let ladder: &[tl3_config::Model] = match role {
         "ingest" => &models.ingest,
@@ -696,9 +705,9 @@ fn effort(models: Option<&tl3_config::Models>, role: &str, model: &str) -> Optio
         "reviewer" => &models.reviewer,
         _ => return None,
     };
-    ladder
-        .iter()
-        .find(|candidate| candidate.name == model)?
+    rung.and_then(|rung| ladder.get(rung))
+        .filter(|candidate| candidate.name == model)
+        .or_else(|| ladder.iter().find(|candidate| candidate.name == model))?
         .effort
         .clone()
 }

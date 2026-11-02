@@ -83,14 +83,14 @@ function Section(props: { title: string; count?: number; children: ReactNode }) 
   const heading = useId();
   return (
     <section aria-labelledby={heading} className="border-t border-border px-4 py-3">
-      <h3 id={heading} className="mb-2 flex items-center gap-2 text-xs font-semibold tracking-wide text-muted uppercase">
-        {props.title}
+      <div className="mb-2 flex items-center gap-2">
+        <h3 id={heading} className="text-xs font-semibold tracking-wide text-muted uppercase">
+          {props.title}
+        </h3>
         {props.count !== undefined && (
-          <span className="rounded bg-surface-2 px-1.5 font-mono text-2xs font-medium text-faint normal-case">
-            {props.count}
-          </span>
+          <span className="rounded bg-surface-2 px-1.5 font-mono text-2xs font-medium text-faint">{props.count}</span>
         )}
-      </h3>
+      </div>
       {props.children}
     </section>
   );
@@ -146,7 +146,7 @@ function Header({ card, links }: { card: Card; links: Link[] }) {
 function Counters({ card }: { card: Card }) {
   const counters: Array<[string, ReactNode]> = [
     ["Attempt", card.attempt],
-    ["Fix rounds", Math.max(card.round - 1, 0)],
+    ["Fix rounds", card.round],
     ["Plan retries", card.retries.plan],
     ["Audit rounds", card.retries.audit],
     ["Run failures", card.retries.run_failures],

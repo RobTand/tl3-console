@@ -335,7 +335,11 @@ fn merged_request(files: &Files, traces: &str) {
     }
     let maker = &runs[3];
     assert_eq!(maker["outcome"], "Made a change");
-    assert_eq!(maker["model"], "default-model");
+    assert_eq!(
+        maker["model"],
+        Value::Null,
+        "the simulated maker reports no model"
+    );
     assert_eq!(
         maker["trace_url"],
         format!(
@@ -374,7 +378,7 @@ fn fix_round_and_incident(files: &Files) {
     let file = case_file(files, FIX_ROUND);
     let card = &file["card"];
     assert_eq!(card["ending"], "Merged");
-    assert_eq!(card["round"], 2, "one fix round after the first review");
+    assert_eq!(card["round"], 1, "one fix round after the first review");
     assert_eq!(card["retries"]["run_failures"], 2);
     let columns = strings(&file["timeline"], "column");
     let reviewed = columns.iter().position(|c| c == "Reviewing").unwrap();
@@ -388,6 +392,14 @@ fn fix_round_and_incident(files: &Files) {
     for blocked in &makers[..2] {
         assert_eq!(blocked["status"], "Failed");
         assert_eq!(blocked["outcome"], "Blocked by the environment");
+        assert_eq!(
+            blocked["model"], "default-model",
+            "the run's reply names its model"
+        );
+        assert_eq!(
+            blocked["effort"], "high",
+            "attempt 1 runs the maker ladder's first rung"
+        );
     }
     let reviews: Vec<_> = runs
         .iter()
