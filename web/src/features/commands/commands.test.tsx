@@ -97,6 +97,13 @@ describe("fileCommand", () => {
 });
 
 describe("CardCommands", () => {
+  it("names a postmortem command received from the stream", () => {
+    setup(<CardCommands card={card({ id: 4 })} />, [
+      record("postmortem", 4, { kind: "postmortem" }, "pending"),
+    ]);
+    expect(screen.getByText("Postmortem: pending")).toBeVisible();
+  });
+
   it("confirms a pause in one step, then shows it sending, pending and applied", async () => {
     const user = userEvent.setup();
     const making = card({ id: 4 });
