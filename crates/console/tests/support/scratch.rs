@@ -1,4 +1,3 @@
-// Copied from RobTand/trustladderiii crates/store/tests/support at 43f6506d. Keep in step when the TL3 pin moves.
 use rustix::{
     io::Errno,
     process::{Pid, geteuid, test_kill_process},

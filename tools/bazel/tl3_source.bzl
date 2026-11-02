@@ -45,7 +45,7 @@ def _tl3_source_impl(ctx):
     ctx.file("REPO.bazel", "")
     ctx.file("BUILD.bazel", """filegroup(
     name = "worker_schemas",
-    srcs = glob(["workers/src/tl3_workers/schemas/*.json"]),
+    srcs = glob(["workers/src/tl3_workers/schemas/*.json", "workers/src/tl3_workers/prompts/*.md"]),
     visibility = ["//visibility:public"],
 )
 """)
