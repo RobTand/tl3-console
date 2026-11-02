@@ -1909,12 +1909,18 @@ fn postmortem_scenarios() {
                 assert_eq!(result["postmortems"].as_array().unwrap().len(), 1);
                 assert_eq!(result["postmortems"][0]["trigger"], "close");
                 assert_eq!(result["postmortems"][0]["recommendations"][0]["seen_in"], 3);
-                assert_eq!(json("/api/postmortems?q=nonexistentzephyr")["postmortems"], serde_json::json!([]));
+                assert_eq!(
+                    json("/api/postmortems?q=nonexistentzephyr")["postmortems"],
+                    serde_json::json!([])
+                );
                 let title_only = json("/api/postmortems?q=journal");
                 assert_eq!(title_only["postmortems"].as_array().unwrap().len(), 1);
                 assert_eq!(title_only["postmortems"][0]["title"], "Transport journal");
                 let recommendation_only = json("/api/postmortems?q=automatically");
-                assert_eq!(recommendation_only["postmortems"].as_array().unwrap().len(), 3);
+                assert_eq!(
+                    recommendation_only["postmortems"].as_array().unwrap().len(),
+                    3
+                );
                 let first = json("/api/postmortems?limit=1");
                 let next = first["next_before"].as_i64().expect("another page");
                 assert!(
@@ -1958,7 +1964,17 @@ fn postmortem_scenarios() {
                     "id": "33700000-0000-4000-8000-000000000002",
                     "action": {"kind": "pause"}
                 });
-                assert_eq!(send(address, "POST", "/api/requests/0/commands", &[("X-TL3-Console", "1")], Some(&command)).0, 202);
+                assert_eq!(
+                    send(
+                        address,
+                        "POST",
+                        "/api/requests/0/commands",
+                        &[("X-TL3-Console", "1")],
+                        Some(&command)
+                    )
+                    .0,
+                    202
+                );
                 // This command is a barrier after the world patch. A spurious
                 // postmortem event from that commit would arrive before it.
                 assert_eq!(stream.event().name, "commands");
@@ -1995,16 +2011,22 @@ fn postmortem_scenarios() {
     assert_eq!(failed, 0, "postmortem scenarios failed");
 }
 
-
 fn postmortem_stream(address: SocketAddr) -> EventStream {
     let mut stream = EventStream::open(address, None);
     stream.board_event();
-    let mut live = stream.last_database.as_ref().is_some_and(|event| event["connected"] == true);
+    let mut live = stream
+        .last_database
+        .as_ref()
+        .is_some_and(|event| event["connected"] == true);
     loop {
         let event = stream.event();
-        if event.name == "database" { live = event.data["connected"] == true; }
+        if event.name == "database" {
+            live = event.data["connected"] == true;
+        }
         // Drain the initial invalidation after LISTEN is connected. A reconnect
         // before this point is allowed to invalidate postmortems too.
-        if live && event.name == "postmortems" { return stream; }
+        if live && event.name == "postmortems" {
+            return stream;
+        }
     }
 }

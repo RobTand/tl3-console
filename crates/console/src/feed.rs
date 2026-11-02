@@ -55,10 +55,16 @@ impl Backoff {
 /// Preserve postmortem invalidation even when its tables change with the world.
 fn change(tables: &BTreeSet<String>) -> Change {
     let progress = |table: &str| matches!(table, "tl3_worker_progress" | "tl3_worker_summary");
-    let postmortem = |table: &str| matches!(table,
-        "tl3_postmortems" | "tl3_postmortem_recommendations" | "tl3_code_grades");
+    let postmortem = |table: &str| {
+        matches!(
+            table,
+            "tl3_postmortems" | "tl3_postmortem_recommendations" | "tl3_code_grades"
+        )
+    };
     let postmortems = tables.iter().any(|table| postmortem(table));
-    let world = tables.iter().any(|table| !progress(table) && !postmortem(table) && table != "tl3_console_commands");
+    let world = tables
+        .iter()
+        .any(|table| !progress(table) && !postmortem(table) && table != "tl3_console_commands");
     match (world, postmortems) {
         (true, true) => Change::WorldPostmortems,
         (true, false) => Change::World,

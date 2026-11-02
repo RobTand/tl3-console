@@ -164,7 +164,8 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
             }
             publish.send_if_modified(|current| {
                 let mut changed = current.connected != live;
-                if built.is_ok() && matches!(change, Change::Postmortems | Change::WorldPostmortems) {
+                if built.is_ok() && matches!(change, Change::Postmortems | Change::WorldPostmortems)
+                {
                     current.postmortems += 1;
                     changed = true;
                 }
