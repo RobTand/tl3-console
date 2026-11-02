@@ -52,13 +52,17 @@ impl Backoff {
     }
 }
 
-/// Progress tables change without a controller commit; anything else is the world.
+/// Progress tables change without a controller commit, and the console files
+/// commands without one; anything else is the world.
 fn change(tables: &BTreeSet<String>) -> Change {
-    if tables
-        .iter()
-        .all(|table| matches!(table.as_str(), "tl3_worker_progress" | "tl3_worker_summary"))
-    {
+    let progress = |table: &str| matches!(table, "tl3_worker_progress" | "tl3_worker_summary");
+    if tables.iter().all(|table| progress(table)) {
         Change::Progress
+    } else if tables
+        .iter()
+        .all(|table| progress(table) || table == "tl3_console_commands")
+    {
+        Change::Commands
     } else {
         Change::World
     }

@@ -13,6 +13,8 @@ export interface Shown {
 interface Sent {
   node: number;
   action: Action;
+  /** When this tab filed it, to order it against the stream's records. */
+  at: number;
   /** Set when the console refused the request or couldn't be reached. */
   error: string | null;
 }
@@ -43,10 +45,11 @@ export function CommandsProvider(props: {
   const run = useCallback(
     (node: number, action: Action) => {
       const id = commandId();
-      setSent((current) => new Map(current).set(id, { node, action, error: null }));
+      const at = Date.now();
+      setSent((current) => new Map(current).set(id, { node, action, at, error: null }));
       file(node, id, action).catch((error: unknown) => {
         const reason = error instanceof Error ? error.message : String(error);
-        setSent((current) => new Map(current).set(id, { node, action, error: reason }));
+        setSent((current) => new Map(current).set(id, { node, action, at, error: reason }));
       });
       return id;
     },
@@ -58,19 +61,18 @@ export function CommandsProvider(props: {
       run,
       records: props.records,
       latest(node) {
-        // This tab's newest command for the card; another tab's while it is pending.
-        const mine = [...sent].filter(([, command]) => command.node === node).pop();
-        if (mine) {
+        // The stream lists commands newest first, settled or not, from any tab.
+        const record = props.records.find((record) => record.node === node && record.action !== null);
+        // This tab's newest command the stream doesn't list yet: sending, or failed to send.
+        const mine = [...sent].filter(([id, command]) => command.node === node && !byId.has(id)).pop();
+        if (mine && (!record || mine[1].at >= record.received_ms)) {
           const [id, command] = mine;
-          const record = byId.get(id);
-          if (record) return { id, action: command.action, status: record.status, reason: record.reason };
           return command.error === null
             ? { id, action: command.action, status: "sending", reason: null }
             : { id, action: command.action, status: "failed", reason: command.error };
         }
-        const pending = props.records.find((record) => record.node === node && record.status === "pending");
-        return pending?.action
-          ? { id: pending.id, action: pending.action, status: pending.status, reason: null }
+        return record?.action
+          ? { id: record.id, action: record.action, status: record.status, reason: record.reason }
           : null;
       },
     };

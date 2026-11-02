@@ -31,6 +31,7 @@ pub(crate) fn router(
     published: watch::Receiver<Published>,
     assets: &Path,
     commands: Router,
+    hosts: crate::hosts::Hosts,
 ) -> Router {
     let app = ServeDir::new(assets).fallback(ServeFile::new(assets.join("index.html")));
     Router::new()
@@ -40,6 +41,10 @@ pub(crate) fn router(
         .fallback_service(app)
         .with_state(published)
         .merge(commands)
+        .layer(axum::middleware::from_fn_with_state(
+            hosts,
+            crate::hosts::guard,
+        ))
         .layer(SetResponseHeaderLayer::overriding(
             header::CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(CSP),

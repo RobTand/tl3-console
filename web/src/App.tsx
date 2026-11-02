@@ -131,9 +131,16 @@ export function App() {
                   now={now}
                   cards={cards.filter((card) => card.column === column.column)}
                   {...(older > 0 ? { note: `${older} older ${older === 1 ? "ending" : "endings"} not shown` } : {})}
-                  cardExtras={(card) => <CardCommands card={card} />}
+                  cardExtras={(card) => <CardCommands card={card} compact={column.column !== "NeedsRob"} />}
                   {...(column.column === "NeedsRob"
-                    ? { action: <DeferAll cards={cards.filter((card) => card.question !== null)} /> }
+                    ? {
+                        action: (
+                          <DeferAll
+                            cards={cards.filter((card) => card.question !== null)}
+                            filtered={repo !== null || query.trim() !== ""}
+                          />
+                        ),
+                      }
                     : {})}
                 />
               );

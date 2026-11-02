@@ -6,18 +6,24 @@
 use crate::api::{CommandRequest, Filed};
 use axum::{
     Json, Router,
-    extract::{Path, State, rejection::JsonRejection},
+    extract::{DefaultBodyLimit, Path, State, rejection::JsonRejection},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::post,
 };
 use std::sync::{Arc, Mutex};
-use tl3_controller::console::CommandRecord;
+use tl3_controller::console::{Action, Choice, CommandRecord};
 use tl3_store::ConsoleCommands;
 
 /// Browsers never send this header cross-site without a CORS preflight,
 /// which the console never grants.
 pub const HEADER: &str = "x-tl3-console";
+
+/// TL3 refuses Rob's words beyond 20,000 characters, so the console does too,
+/// before filing them.
+const MAX_TEXT_CHARS: usize = 20_000;
+/// Room for that text with every character JSON-escaped, and the rest.
+const MAX_BODY_BYTES: usize = 4 * 1024 + 6 * MAX_TEXT_CHARS;
 
 #[derive(Clone)]
 struct Filer {
@@ -56,6 +62,7 @@ fn is_connection(error: &tl3_store::Error) -> bool {
 pub(crate) fn router(settings: tl3_config::Store) -> Router {
     Router::new()
         .route("/api/requests/{id}/commands", post(file))
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(Filer {
             settings,
             session: Arc::default(),
@@ -119,12 +126,27 @@ async fn file(
             "Commands come only from the console's own page.",
         );
     }
-    let Ok(Json(request)) = body else {
+    let request = match body {
+        Ok(Json(request)) => request,
+        Err(rejection) if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE => {
+            return refused(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Commands are at most a few KiB plus 20,000 characters of your words.",
+            );
+        }
+        Err(_) => {
+            return refused(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "The console couldn't read this command.",
+            );
+        }
+    };
+    if words(&request.action).is_some_and(|text| text.chars().count() > MAX_TEXT_CHARS) {
         return refused(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "The console couldn't read this command.",
+            "Answers can be at most 20,000 characters.",
         );
-    };
+    }
     if !is_uuid(&request.id) {
         return refused(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -156,8 +178,34 @@ async fn file(
 /// Long texts a `commands` event repeats are cut to this many characters.
 pub(crate) const SHOWN_CHARS: usize = 200;
 
+/// Rob's own words in an action, if it carries any.
+fn words(action: &Action) -> Option<&String> {
+    match action {
+        Action::Comment { text }
+        | Action::Answer {
+            choice: Choice::ChangeRequest { text } | Choice::TryAgain { guidance: text },
+            ..
+        } => Some(text),
+        _ => None,
+    }
+}
+
 /// The newest commands as the stream shows them: Rob's long words abbreviated.
-pub(crate) fn brief(records: Vec<CommandRecord>) -> Vec<CommandRecord> {
+pub(crate) fn brief(mut records: Vec<CommandRecord>) -> Vec<CommandRecord> {
+    for record in &mut records {
+        let text = match &mut record.action {
+            Some(Action::Comment { text })
+            | Some(Action::Answer {
+                choice: Choice::ChangeRequest { text } | Choice::TryAgain { guidance: text },
+                ..
+            }) => text,
+            _ => continue,
+        };
+        if let Some((cut, _)) = text.char_indices().nth(SHOWN_CHARS) {
+            text.truncate(cut);
+            text.push('…');
+        }
+    }
     records
 }
 

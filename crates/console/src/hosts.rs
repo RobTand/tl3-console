@@ -4,30 +4,59 @@
 
 use axum::{
     extract::{Request, State},
+    http::{StatusCode, header},
     middleware::Next,
-    response::Response,
+    response::{IntoResponse, Response},
 };
-use std::net::SocketAddr;
+use std::{collections::BTreeSet, net::SocketAddr, sync::Arc};
 
-/// The Host header values this console answers to.
+/// The Host header values this console answers to, lowercased.
 #[derive(Clone, Debug)]
-pub(crate) struct Hosts;
+pub(crate) struct Hosts(Arc<BTreeSet<String>>);
 
 impl Hosts {
     /// The bound address, `localhost` on a loopback address, and public names
     /// such as the tunnel's (#338).
-    pub(crate) fn new(_address: SocketAddr, _public: &[String]) -> crate::Result<Self> {
-        Ok(Self)
+    pub(crate) fn new(address: SocketAddr, public: &[String]) -> crate::Result<Self> {
+        let mut names = BTreeSet::from([address.to_string()]);
+        if address.ip().is_loopback() {
+            names.insert(format!("localhost:{}", address.port()));
+        }
+        for name in public {
+            let valid = !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'));
+            if !valid {
+                return Err(crate::Error::Invalid(
+                    "public hosts are host names, with an optional port",
+                ));
+            }
+            names.insert(name.to_ascii_lowercase());
+        }
+        Ok(Self(Arc::new(names)))
     }
 
-    pub(crate) fn allows(&self, _host: Option<&str>) -> bool {
-        todo!()
+    pub(crate) fn allows(&self, host: Option<&str>) -> bool {
+        host.is_some_and(|host| self.0.contains(&host.to_ascii_lowercase()))
     }
 }
 
 /// Refuse any request, read or write, for a Host this console doesn't serve.
-pub(crate) async fn guard(State(_hosts): State<Hosts>, request: Request, next: Next) -> Response {
-    next.run(request).await
+pub(crate) async fn guard(State(hosts): State<Hosts>, request: Request, next: Next) -> Response {
+    let host = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|host| host.to_str().ok());
+    if hosts.allows(host) {
+        next.run(request).await
+    } else {
+        (
+            StatusCode::MISDIRECTED_REQUEST,
+            "This console doesn't answer to that host name.\n",
+        )
+            .into_response()
+    }
 }
 
 #[cfg(test)]

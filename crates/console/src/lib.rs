@@ -98,8 +98,9 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         store,
         assets,
         models,
-        public_hosts: _,
+        public_hosts,
     } = options;
+    let hosts = hosts::Hosts::new(address, &public_hosts)?;
     let store_for_commands = store.clone();
     {
         let (store, rebuilds, connected) = (store.clone(), rebuilds.clone(), connected.clone());
@@ -111,6 +112,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
             models,
             reader: None,
             rows: None,
+            commands: None,
         };
         let mut retry = feed::Backoff::new();
         while let Some(change) = rebuilds.next() {
@@ -154,7 +156,12 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         .thread_name("tl3-console-http")
         .enable_all()
         .build()?;
-    let app = server::router(published, &assets, commands::router(store_for_commands));
+    let app = server::router(
+        published,
+        &assets,
+        commands::router(store_for_commands),
+        hosts,
+    );
     supervisor.spawn("http", move || {
         let served = runtime.block_on(async move {
             let listener = tokio::net::TcpListener::from_std(listener)?;
@@ -179,6 +186,8 @@ struct Builder {
     models: Option<tl3_config::Models>,
     reader: Option<Reader>,
     rows: Option<Rows>,
+    /// The newest commands as last read; a progress tick keeps them.
+    commands: Option<Vec<CommandRecord>>,
 }
 
 impl Builder {
@@ -204,13 +213,18 @@ impl Builder {
         let session = self.reader.as_mut().expect("an open reader");
         let mut tx = session.transaction()?;
         let rows = match (change, self.rows.take()) {
-            (Change::Progress, Some(mut rows)) => {
+            (Change::Progress | Change::Commands, Some(mut rows)) => {
                 rows.refresh_progress(&mut tx)?;
                 rows
             }
             _ => Rows::read(&mut tx)?,
         };
-        let commands = tl3_controller::console::recent(&mut tx, COMMANDS_SHOWN)?;
+        // tl3d settles commands in its own commits, so World rereads them too.
+        let commands = match (change, self.commands.take()) {
+            (Change::Progress, Some(commands)) => commands,
+            _ => commands::brief(tl3_controller::console::recent(&mut tx, COMMANDS_SHOWN)?),
+        };
+        self.commands = Some(commands.clone());
         tx.commit().map_err(tl3_store::Error::from)?;
         let board = rows.project(now_ms(), self.models.as_ref());
         self.rows = Some(rows);

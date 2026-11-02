@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { DropdownMenu } from "radix-ui";
+import { useEffect, useRef, useState } from "react";
 import type { Action, Card, CardQuestion, Ending, QuestionOption } from "../../api/types.gen";
 import { statusText, useCommands } from "./commands";
 
@@ -9,6 +10,11 @@ const BUTTON =
   "inline-flex h-6 items-center rounded border border-border bg-surface px-2 text-2xs font-medium text-text hover:border-border-strong disabled:cursor-not-allowed disabled:opacity-50";
 const PRIMARY =
   "inline-flex h-6 items-center rounded bg-accent px-2 text-2xs font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+
+const ITEM =
+  "cursor-default rounded px-2 py-1.5 text-text outline-none data-[highlighted]:bg-accent-soft";
+/** Where focus returns when a compact card's confirmation closes. */
+const MENU = "menu";
 
 type Steer = Extract<Action, { kind: "pause" | "resume" | "stop" | "restart" }>;
 
@@ -21,36 +27,111 @@ function steering(card: Card): Steer[] {
 
 const VERB: Record<Steer["kind"], string> = { pause: "Pause", resume: "Resume", stop: "Stop", restart: "Restart" };
 
-/** Pause, resume, stop and restart, each confirmed in one step. */
-function Steering({ card }: { card: Card }) {
+/**
+ * Pause, resume, stop and restart, each confirmed in one step. Focus moves
+ * into the confirmation and back to what opened it, so the keyboard never
+ * loses its place when the buttons swap. Compact cards keep these behind one
+ * menu, with the incident clears.
+ */
+function Steering({ card, compact }: { card: Card; compact: boolean }) {
   const { run } = useCommands();
   const [armed, setArmed] = useState<Steer | null>(null);
+  const [returnTo, setReturnTo] = useState<string | null>(null);
+  const confirm = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLButtonElement>(null);
+  const triggers = useRef(new Map<string, HTMLButtonElement>());
+  // A menu choice opens the confirmation; the menu mustn't take focus back.
+  const arming = useRef(false);
+  useEffect(() => {
+    if (armed) confirm.current?.focus();
+  }, [armed]);
+  useEffect(() => {
+    if (armed || returnTo === null) return;
+    const target = returnTo === MENU ? menu.current : (triggers.current.get(returnTo) ?? triggers.current.values().next().value);
+    target?.focus();
+    setReturnTo(null);
+  }, [armed, returnTo]);
   const actions = steering(card);
-  if (actions.length === 0) return null;
-  if (armed) {
+  const close = (apply: boolean) => {
+    if (!armed) return;
+    if (apply) run(card.id, armed);
+    setReturnTo(compact ? MENU : armed.kind);
+    setArmed(null);
+  };
+  const confirmation = armed && (
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Confirm">
+      <span className="text-2xs text-text">{VERB[armed.kind]} this request?</span>
+      <button ref={confirm} type="button" className={PRIMARY} onClick={() => close(true)}>
+        Confirm {VERB[armed.kind].toLowerCase()}
+      </button>
+      <button type="button" className={BUTTON} onClick={() => close(false)}>
+        Cancel
+      </button>
+    </div>
+  );
+  if (compact) {
+    if (actions.length === 0 && card.incidents.length === 0) return null;
     return (
-      <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Confirm">
-        <span className="text-2xs text-text">{VERB[armed.kind]} this request?</span>
-        <button
-          type="button"
-          className={PRIMARY}
-          onClick={() => {
-            run(card.id, armed);
-            setArmed(null);
-          }}
-        >
-          Confirm {VERB[armed.kind].toLowerCase()}
-        </button>
-        <button type="button" className={BUTTON} onClick={() => setArmed(null)}>
-          Cancel
-        </button>
-      </div>
+      <>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger ref={menu} aria-label="Actions" className={`${BUTTON} px-1.5`}>
+            <span aria-hidden="true">⋯</span>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              align="end"
+              sideOffset={4}
+              onCloseAutoFocus={(event) => {
+                if (arming.current) {
+                  arming.current = false;
+                  event.preventDefault();
+                }
+              }}
+              className="z-10 min-w-36 rounded-md border border-border bg-surface p-1 text-xs shadow-lg"
+            >
+              {actions.map((action) => (
+                <DropdownMenu.Item
+                  key={action.kind}
+                  className={ITEM}
+                  onSelect={() => {
+                    arming.current = true;
+                    setArmed(action);
+                  }}
+                >
+                  {VERB[action.kind]}
+                </DropdownMenu.Item>
+              ))}
+              {card.incidents.map((incident) => (
+                <DropdownMenu.Item
+                  key={incident.id}
+                  className={ITEM}
+                  onSelect={() => run(card.id, { kind: "clear_incident", incident: incident.id })}
+                >
+                  Clear incident {incident.id}
+                </DropdownMenu.Item>
+              ))}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+        {confirmation}
+      </>
     );
   }
+  if (actions.length === 0) return null;
+  if (confirmation) return confirmation;
   return (
     <div className="flex flex-wrap gap-1.5" role="group" aria-label="Actions">
       {actions.map((action) => (
-        <button key={action.kind} type="button" className={BUTTON} onClick={() => setArmed(action)}>
+        <button
+          key={action.kind}
+          ref={(button) => {
+            if (button) triggers.current.set(action.kind, button);
+            else triggers.current.delete(action.kind);
+          }}
+          type="button"
+          className={BUTTON}
+          onClick={() => setArmed(action)}
+        >
           {VERB[action.kind]}
         </button>
       ))}
@@ -65,6 +146,9 @@ function DetailForm(props: { option: QuestionOption; onSend: (value: string) => 
   const label =
     props.option.detail === "amount" ? "Credit (1–100)" : props.option.detail === "guidance" ? "Your guidance" : "Your new request";
   const ready = amount ? /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 100 : value.trim() !== "";
+  const input = useRef<HTMLInputElement>(null);
+  const area = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => (input.current ?? area.current)?.focus(), []);
   return (
     <form
       className="mt-1.5 flex flex-col gap-1.5"
@@ -77,6 +161,7 @@ function DetailForm(props: { option: QuestionOption; onSend: (value: string) => 
         {label}
         {amount ? (
           <input
+            ref={input}
             type="number"
             min={1}
             max={100}
@@ -86,6 +171,7 @@ function DetailForm(props: { option: QuestionOption; onSend: (value: string) => 
           />
         ) : (
           <textarea
+            ref={area}
             rows={3}
             value={value}
             onChange={(event) => setValue(event.target.value)}
@@ -122,8 +208,20 @@ function answer(question: CardQuestion, option: QuestionOption, detail = ""): Ac
 export function QuestionPanel({ card, question }: { card: Card; question: CardQuestion }) {
   const { run } = useCommands();
   const [detail, setDetail] = useState<QuestionOption | null>(null);
+  const [returnTo, setReturnTo] = useState<string | null>(null);
+  const optionButtons = useRef(new Map<string, HTMLButtonElement>());
   const [words, setWords] = useState("");
   const recommended = question.options[question.recommended];
+  // Closing an option's form returns focus to the option that opened it.
+  useEffect(() => {
+    if (detail || returnTo === null) return;
+    optionButtons.current.get(returnTo)?.focus();
+    setReturnTo(null);
+  }, [detail, returnTo]);
+  const closeDetail = () => {
+    setReturnTo(detail?.answer ?? null);
+    setDetail(null);
+  };
   return (
     <section aria-label={`Question ${question.id}`} className="mt-2 rounded border border-info/30 bg-info-soft/40 p-2">
       <p className="text-xs text-text">
@@ -133,15 +231,21 @@ export function QuestionPanel({ card, question }: { card: Card; question: CardQu
         {question.options.map((option, index) => (
           <li key={option.answer}>
             <button
+              ref={(button) => {
+                if (button) optionButtons.current.set(option.answer, button);
+                else optionButtons.current.delete(option.answer);
+              }}
               type="button"
-              title={option.outcome}
-              className={`${BUTTON} h-auto min-h-6 w-full justify-between gap-2 py-1 text-left`}
+              className={`${BUTTON} h-auto min-h-6 w-full flex-col items-stretch gap-0.5 py-1 text-left`}
               onClick={() => (option.detail ? setDetail(option) : run(card.id, answer(question, option)))}
             >
-              <span>{option.label}</span>
-              {index === question.recommended && (
-                <span className="rounded bg-accent-soft px-1 text-2xs font-medium text-accent">Recommended</span>
-              )}
+              <span className="flex items-center justify-between gap-2">
+                <span>{option.label}</span>
+                {index === question.recommended && (
+                  <span className="rounded bg-accent-soft px-1 text-2xs font-medium text-accent">Recommended</span>
+                )}
+              </span>
+              <span className="font-normal text-muted">{option.outcome}</span>
             </button>
           </li>
         ))}
@@ -149,10 +253,10 @@ export function QuestionPanel({ card, question }: { card: Card; question: CardQu
       {detail && (
         <DetailForm
           option={detail}
-          onCancel={() => setDetail(null)}
+          onCancel={closeDetail}
           onSend={(value) => {
             run(card.id, answer(question, detail, value));
-            setDetail(null);
+            closeDetail();
           }}
         />
       )}
@@ -200,8 +304,11 @@ export function QuestionPanel({ card, question }: { card: Card; question: CardQu
   );
 }
 
-/** Everything Rob can do from a card, and how his last command settled. */
-export function CardCommands({ card }: { card: Card; compact?: boolean }) {
+/**
+ * Everything Rob can do from a card, and how his last command settled.
+ * Compact cards keep the actions behind one menu; Needs Rob cards show them.
+ */
+export function CardCommands({ card, compact = false }: { card: Card; compact?: boolean }) {
   const { run, latest } = useCommands();
   const shown = latest(card.id);
   const tone =
@@ -210,6 +317,23 @@ export function CardCommands({ card }: { card: Card; compact?: boolean }) {
       : shown?.status === "applied"
         ? "text-ok"
         : "text-muted";
+  // The live region stays mounted, so the first status is announced too.
+  const status = (
+    <p aria-live="polite" className={shown ? `min-w-0 flex-1 text-2xs ${tone}` : "sr-only"}>
+      {shown ? statusText(shown) : ""}
+    </p>
+  );
+  if (compact) {
+    return (
+      <div className="mt-2 flex flex-col gap-1.5">
+        {card.question && <QuestionPanel card={card} question={card.question} />}
+        <div className="flex items-center justify-end gap-2">
+          {status}
+          <Steering card={card} compact />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="mt-2 flex flex-col gap-1.5 border-t border-border pt-2">
       {card.question && <QuestionPanel card={card} question={card.question} />}
@@ -227,12 +351,8 @@ export function CardCommands({ card }: { card: Card; compact?: boolean }) {
           </button>
         </div>
       ))}
-      <Steering card={card} />
-      {shown && (
-        <p aria-live="polite" data-command={shown.status} className={`text-2xs ${tone}`}>
-          {statusText(shown)}
-        </p>
-      )}
+      <Steering card={card} compact={false} />
+      {status}
     </div>
   );
 }

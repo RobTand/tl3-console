@@ -6,25 +6,27 @@ import { useCommands } from "./commands";
 /**
  * "Let TL3 decide on all" for the Needs Rob column: lists what each question
  * will get before Rob confirms, then defers each one. tl3d skips, with a
- * reason, any question answered in the meantime.
+ * reason, any question answered in the meantime. With a filter on, it
+ * covers only the questions shown, and says so.
  */
-export function DeferAll({ cards }: { cards: Card[]; filtered?: boolean }) {
+export function DeferAll({ cards, filtered = false }: { cards: Card[]; filtered?: boolean }) {
   const { run } = useCommands();
   const [open, setOpen] = useState(false);
   const asked = cards.filter((card) => card.question !== null);
   const deferrable = asked.filter((card) => card.question!.defer_blocked === null);
+  const label = filtered ? `Let TL3 decide on all shown (${asked.length})` : "Let TL3 decide on all";
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger
         disabled={asked.length === 0}
         className="rounded border border-border bg-surface px-1.5 py-0.5 text-2xs font-medium tracking-normal text-text normal-case hover:border-border-strong disabled:cursor-not-allowed disabled:opacity-50"
       >
-        Let TL3 decide on all
+        {label}
       </Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-black/40" />
         <Dialog.Content className="fixed top-1/2 left-1/2 max-h-[80vh] w-[min(36rem,92vw)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border border-border bg-surface p-4 shadow-lg">
-          <Dialog.Title className="text-sm font-semibold text-text">Let TL3 decide on all</Dialog.Title>
+          <Dialog.Title className="text-sm font-semibold text-text">{label}</Dialog.Title>
           <Dialog.Description className="mt-1 text-xs text-muted">
             TL3 applies its recommended option to each question below and notes on each issue that you deferred.
           </Dialog.Description>
