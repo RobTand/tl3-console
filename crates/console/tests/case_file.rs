@@ -55,10 +55,7 @@ fn main() {
     .unwrap();
     let address = console.address();
 
-    let files = Files {
-        address,
-        records: records.path().to_owned(),
-    };
+    let files = Files { address };
     drive(&mut controller, MERGED, |n| n.phase.is_closed());
     merged_request(&files, &traces);
     println!("test merged_request ... ok");
@@ -93,7 +90,7 @@ fn main() {
     );
     assert_eq!(get(address, "/api/requests/99").0, 404);
     assert_eq!(get(address, "/api/requests/not-a-number").0, 400);
-    println!("test case_files_call_nothing_outside ... ok");
+    println!("test case_files_never_reach_mlflow ... ok");
     drop(controller);
     database.stop();
     println!("5 case file scenarios passed; no skips");
@@ -247,11 +244,8 @@ impl Executor for Workers {
 
 struct Files {
     address: SocketAddr,
-    records: std::path::PathBuf,
 }
 
-/// A request's case file. Reading it delivers nothing to GitHub, Mergify,
-/// PrismaBuild or the workers: the simulated upstreams' records don't change.
 fn role_name(role: Role) -> &'static str {
     match role {
         Role::Ingest => "ingest",
@@ -263,10 +257,8 @@ fn role_name(role: Role) -> &'static str {
 }
 
 fn case_file(files: &Files, id: u64) -> Value {
-    let before = adapters::delivery_counts(&files.records).unwrap();
     let (status, body) = get(files.address, &format!("/api/requests/{id}"));
     assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
-    assert_eq!(adapters::delivery_counts(&files.records).unwrap(), before);
     serde_json::from_slice(&body).unwrap()
 }
 

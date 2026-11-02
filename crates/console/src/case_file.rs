@@ -1032,9 +1032,76 @@ fn plain(value: &str) -> String {
         .join(" ")
 }
 
+/// Stored multi-line text with its line breaks kept: no control,
+/// direction-override or zero-width characters, no trailing spaces.
+fn plain_text(value: &str) -> String {
+    let _ = value;
+    todo!("plain text")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::Links;
+    use super::{Effect, Links, plain_text, question};
+    use serde_json::json;
+    use tl3_controller::board::Request;
+    use tl3_kernel::{Cont, Node, NodeId, QKind, Question, RepoId};
+
+    #[test]
+    fn plain_text_keeps_line_breaks_and_drops_hidden_characters() {
+        assert_eq!(
+            plain_text("  Removed:\r\n  a.py\u{202e}\u{7}  \n\n\u{200b}    b.py  \n"),
+            "  Removed:\n  a.py\n\n    b.py"
+        );
+    }
+
+    /// A question whose delivery the writer can't read still shows, with what
+    /// is known, instead of failing the whole case file.
+    #[test]
+    fn an_unreadable_question_record_degrades_only_the_question() {
+        let mut node = Node::new(RepoId(0));
+        node.question = Some(Question {
+            id: 3,
+            kind: QKind::CantMeet,
+            cont: Cont::Nowhere,
+            cost: 0,
+            clarified: false,
+        });
+        let request = Request {
+            id: NodeId(0),
+            node,
+            repo: "RobTand/tl3-sandbox".into(),
+            issue: 7,
+            title: "Fix the build".into(),
+            question_post_failed: false,
+            phase_since_ms: None,
+            progress: None,
+            worker_failure: None,
+            incidents: Vec::new(),
+            maker_model: None,
+        };
+        // The delivery lacks the kernel question binding writer_input needs.
+        let delivery = serde_json::from_value(json!({
+            "key": "notice:9:0", "epoch": 0, "generation": 1, "head_sha": null,
+            "output": {"Notice": {"node": 0, "notice": {"Ask": {"question": 3}}}},
+            "repository": {"owner": "RobTand", "name": "tl3-sandbox", "installation": 1},
+            "issue": 7, "pull_request": null, "paths": [], "attempt": 0, "round": 0,
+        }))
+        .unwrap();
+        let effect = Effect {
+            key: "notice:9:0".into(),
+            delivery,
+            state: "Confirmed".into(),
+            created_revision: 9,
+            created_ms: 0,
+            created_by: ("notice".into(), json!(null)),
+            updated_ms: 0,
+            completion: None,
+        };
+        let shown = question(&request, &[effect]).unwrap().unwrap();
+        assert_eq!(shown.kind, "Can't meet the request");
+        assert_eq!(shown.obstacle, "The question's record wasn't found.");
+        assert!(shown.options.is_empty());
+    }
 
     #[test]
     fn trace_links_need_an_http_url() {

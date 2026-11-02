@@ -31,6 +31,23 @@ describe("useCaseFile", () => {
     expect(result.current.file?.revision).toBe(40);
   });
 
+  it("reads the case file again when the same request is reopened", async () => {
+    let revision = 40;
+    const fetch = vi.fn(async () => new Response(JSON.stringify(caseFile({ revision: revision++ })), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    const shown = card({ id: 1 });
+    const { result, rerender } = renderHook(({ id }) => useCaseFile(id, id === null ? undefined : shown), {
+      wrapper: wrapper(),
+      initialProps: { id: 1 as number | null },
+    });
+    await waitFor(() => expect(result.current.file?.revision).toBe(40));
+    rerender({ id: null });
+    rerender({ id: 1 });
+    expect(result.current.file).toBeUndefined();
+    await waitFor(() => expect(result.current.file?.revision).toBe(41));
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("reports a request the console doesn't know", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("No request has that id.\n", { status: 404 })));
     const { result } = renderHook(() => useCaseFile(99, undefined), { wrapper: wrapper() });

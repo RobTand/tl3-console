@@ -9,6 +9,7 @@ pub mod case_file;
 mod feed;
 mod rebuild;
 mod server;
+mod sessions;
 mod supervise;
 
 use rebuild::{Change, Rebuilds};

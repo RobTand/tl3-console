@@ -1,7 +1,8 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { card } from "../../fixtures";
-import { CaseFileView } from "./CaseDrawer";
+import { CaseDrawer, CaseFileView } from "./CaseDrawer";
 import { caseFile, run, T0 } from "./fixtures";
 
 const MINUTE = 60_000;
@@ -38,7 +39,7 @@ describe("CaseFileView", () => {
     const counters = section("Counters");
     for (const [term, value] of [
       ["Attempt", "2"],
-      ["Fix rounds", "1"],
+      ["In a fix round", "Yes"],
       ["Plan retries", "1"],
       ["Audit rounds", "2"],
       ["Run failures", "4"],
@@ -57,7 +58,7 @@ describe("CaseFileView", () => {
     expect(items[0]).toHaveTextContent("Rob labelled the issue");
     expect(items[2]).toHaveTextContent("Making");
     expect(items[2]).toHaveTextContent("The planner returned a plan");
-    expect(within(items[1]!).getByText(/09:04/)).toBeVisible();
+    expect(within(items[1]!).getByText(/09:04:00/)).toBeVisible();
   });
 
   it("shows each run's role, model, duration, tokens, outcome and trace link", () => {
@@ -178,6 +179,19 @@ describe("CaseFileView", () => {
     expect(summary.getByText("Stopped")).toBeVisible();
     expect(summary.getByText("Work on this request has stopped.")).toBeVisible();
     expect(summary.getByText("The original request was not completed by this work.")).toBeVisible();
+  });
+
+  it("names the drawer by the request's visible title, shown once", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(caseFile()), { status: 200 })));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <CaseDrawer id={1} card={undefined} now={T0} onClose={() => {}} />
+      </QueryClientProvider>,
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Cache compiled kernels between campaign rows" });
+    expect(within(dialog).getAllByText("Cache compiled kernels between campaign rows")).toHaveLength(1);
+    vi.unstubAllGlobals();
   });
 
   it("leaves out empty sections", () => {

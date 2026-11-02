@@ -9,7 +9,7 @@ test("opening a card shows its case file, and a commit adds to its timeline live
       .getByRole("article", { name: /tl3-sandbox#42:/ })
       .getByRole("link", { name: "Add a live board to the operator console" })
       .click();
-    const drawer = page.getByRole("dialog", { name: /tl3-sandbox#42/ });
+    const drawer = page.getByRole("dialog", { name: "Add a live board to the operator console" });
     await expect(drawer).toBeVisible();
     await expect(page).toHaveURL(/\?request=\d+$/);
     const timeline = drawer.getByRole("region", { name: "Timeline" }).getByRole("listitem");
@@ -42,6 +42,25 @@ test("case file screenshots in both themes", async ({ page }) => {
         await page.screenshot({ path: `${process.env.TL3_SCREENSHOTS}/case-file-${request}-${scheme}.png` });
       }
     }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(fixture.url);
+    await page.getByRole("link", { name: "Remove the stale celestia worker from the fleet file" }).click();
+    await expect(page.getByRole("dialog").getByRole("region", { name: "Timeline" })).toBeVisible();
+    await page.screenshot({ path: `${process.env.TL3_SCREENSHOTS}/case-file-phone.png` });
+  } finally {
+    await fixture.stop();
+  }
+});
+
+test("a long title clears the close button on a phone", async ({ page }) => {
+  const fixture = await startFixture();
+  try {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(fixture.url);
+    await page.getByRole("link", { name: "Remove the stale celestia worker from the fleet file" }).click();
+    const close = await page.getByRole("button", { name: "Close the case file" }).boundingBox();
+    const title = await page.getByRole("dialog").getByRole("heading", { level: 2 }).boundingBox();
+    expect(title!.x + title!.width).toBeLessThanOrEqual(close!.x);
   } finally {
     await fixture.stop();
   }

@@ -17,7 +17,7 @@ fn run() -> tl3_console::Result<()> {
         ["--config", path, "--traces", traces] => (PathBuf::from(path), Some(traces)),
         _ => {
             return Err(tl3_console::Error::Invalid(
-                "usage: tl3-console --config FILE [--traces MLFLOW_TRACES_URL]",
+                "usage: tl3-console --config FILE [--traces URL]",
             ));
         }
     };
