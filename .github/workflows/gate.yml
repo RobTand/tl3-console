@@ -6,8 +6,11 @@ name: Gate
 # two required checks, Rust and Web. See README.md.
 
 on:
+  # Not on labeled: adding "queue" (and Mergify's own "queued") would rerun the
+  # gate and cancel the run in progress, leaving Rust and Web cancelled on the
+  # head, which dequeues the pull request it was meant to queue.
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened]
   push:
     branches: [main]
 

@@ -1,0 +1,17 @@
+# Installed by RobTand/tl3-console's deploy/deploy.py. It replaces the unit
+# TL3's deploy used to install under the same name.
+[Unit]
+Description=TL3 operator console
+Requires=tl3-postgres.service
+PartOf=tl3-postgres.service
+After=tl3-postgres.service
+
+[Service]
+Type=exec
+UMask=0077
+ExecStart=%h/.local/share/tl3-console/current/bin/tl3-console --config %h/.config/tl3-console/console.toml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
