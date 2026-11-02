@@ -27,7 +27,11 @@ const CSP: &str = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src
 /// EventSource waits this long before reconnecting after a dropped stream.
 const RETRY: Duration = Duration::from_secs(1);
 
-pub(crate) fn router(published: watch::Receiver<Published>, assets: &Path) -> Router {
+pub(crate) fn router(
+    published: watch::Receiver<Published>,
+    assets: &Path,
+    store: tl3_config::Store,
+) -> Router {
     let app = ServeDir::new(assets).fallback(ServeFile::new(assets.join("index.html")));
     Router::new()
         .route("/api/board", get(board))
@@ -35,6 +39,7 @@ pub(crate) fn router(published: watch::Receiver<Published>, assets: &Path) -> Ro
         .route("/api/{*rest}", get(not_found))
         .fallback_service(app)
         .with_state(published)
+        .merge(crate::prompts::routes(store))
         .layer(SetResponseHeaderLayer::overriding(
             header::CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(CSP),

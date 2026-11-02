@@ -76,3 +76,25 @@ export type DatabaseStatus = { connected: boolean, };
  * `base`. A client holding another board reconnects for a fresh snapshot.
  */
 export type PatchEvent = { base: string, patch: BoardPatch, };
+
+/**
+ * One version of a role's system prompt. `number` counts a role's versions from 1.
+ */
+export type PromptVersion = { id: number, number: number, text: string, builtin: boolean, author: string, note: string, created_ms: number, };
+
+/**
+ * A role's prompt: the active version, its history, newest first, and a
+ * built-in version a deploy shipped while another stayed active.
+ */
+export type RolePrompt = { role: string, active: number, activated_by: string, activated_ms: number, builtin_update: number | null, versions: Array<PromptVersion>, };
+
+/**
+ * A role in the prompt list.
+ */
+export type PromptRole = { role: string, active_number: number, active_builtin: boolean, builtin_update: boolean, };
+
+/**
+ * `POST /api/prompts/{role}/versions`: a version that becomes active at
+ * once. `base` is the active version the edit started from.
+ */
+export type NewPromptVersion = { text: string, note: string, base: number, };

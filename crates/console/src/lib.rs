@@ -6,6 +6,7 @@
 
 pub mod api;
 mod feed;
+mod prompts;
 mod rebuild;
 mod server;
 mod supervise;
@@ -89,6 +90,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         assets,
         models,
     } = options;
+    let app = server::router(published, &assets, store.clone());
     {
         let (store, rebuilds, connected) = (store.clone(), rebuilds.clone(), connected.clone());
         supervisor.spawn("feed", move || feed::run(store, rebuilds, connected))?;
@@ -136,7 +138,6 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         .thread_name("tl3-console-http")
         .enable_all()
         .build()?;
-    let app = server::router(published, &assets);
     supervisor.spawn("http", move || {
         let served = runtime.block_on(async move {
             let listener = tokio::net::TcpListener::from_std(listener)?;

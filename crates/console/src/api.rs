@@ -1,7 +1,7 @@
 //! The console's HTTP API types. The web app's TypeScript types are generated
 //! from these and the board's, so the two can't drift.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tl3_controller::board::{
     Badge, Board, BoardPatch, Card, CardIncident, Column, ColumnCount, Ending, Flow, Retries,
 };
@@ -19,6 +19,48 @@ pub struct DatabaseStatus {
 pub struct PatchEvent {
     pub base: String,
     pub patch: BoardPatch,
+}
+
+/// One version of a role's system prompt. `number` counts a role's versions from 1.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+pub struct PromptVersion {
+    pub id: i64,
+    pub number: i64,
+    pub text: String,
+    pub builtin: bool,
+    pub author: String,
+    pub note: String,
+    pub created_ms: i64,
+}
+
+/// A role's prompt: the active version, its history, newest first, and a
+/// built-in version a deploy shipped while another stayed active.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+pub struct RolePrompt {
+    pub role: String,
+    pub active: i64,
+    pub activated_by: String,
+    pub activated_ms: i64,
+    pub builtin_update: Option<i64>,
+    pub versions: Vec<PromptVersion>,
+}
+
+/// A role in the prompt list.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+pub struct PromptRole {
+    pub role: String,
+    pub active_number: i64,
+    pub active_builtin: bool,
+    pub builtin_update: bool,
+}
+
+/// `POST /api/prompts/{role}/versions`: a version that becomes active at
+/// once. `base` is the active version the edit started from.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, TS)]
+pub struct NewPromptVersion {
+    pub text: String,
+    pub note: String,
+    pub base: i64,
 }
 
 /// The generated `web/src/api/types.gen.ts`.
@@ -40,6 +82,10 @@ pub fn typescript() -> String {
         (Retries::docs(), Retries::decl(&config)),
         (DatabaseStatus::docs(), DatabaseStatus::decl(&config)),
         (PatchEvent::docs(), PatchEvent::decl(&config)),
+        (PromptVersion::docs(), PromptVersion::decl(&config)),
+        (RolePrompt::docs(), RolePrompt::decl(&config)),
+        (PromptRole::docs(), PromptRole::decl(&config)),
+        (NewPromptVersion::docs(), NewPromptVersion::decl(&config)),
     ] {
         output.push('\n');
         output.push_str(&docs.unwrap_or_default());

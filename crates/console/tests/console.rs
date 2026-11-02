@@ -9,7 +9,7 @@ use std::{
 };
 use support::Database;
 use tl3_controller::{Bootstrap, Controller, LabelledIssue, Repository, adapters, board};
-use tl3_store::{Reader, Store};
+use tl3_store::{Reader, Store, grant_reader};
 
 const ROLE: &str = "tl3_console_reader";
 
@@ -48,13 +48,15 @@ fn main() {
     println!("test console_reads_through_a_role_that_cannot_write ... ok");
     cards_follow_the_quota_fallback(&settings, assets.path());
     println!("test cards_follow_the_quota_fallback ... ok");
+    prompts_edit_and_revert_through_the_api(&mut database, assets.path());
+    println!("test prompts_edit_and_revert_through_the_api ... ok");
     drop(controller);
     builds_once_the_store_is_migrated(&mut database, assets.path());
     println!("test builds_once_the_store_is_migrated ... ok");
     streams_again_after_postgres_restarts(address, &mut database, &settings, records.path());
     println!("test streams_again_after_postgres_restarts ... ok");
     database.stop();
-    println!("8 console scenarios passed; no skips");
+    println!("9 console scenarios passed; no skips");
 }
 
 fn bootstrap() -> Bootstrap {
@@ -544,4 +546,217 @@ fn cards_follow_the_quota_fallback(settings: &tl3_config::Store, assets: &Path) 
             break;
         }
     }
+}
+
+/// An HTTP request from the console's page, or from another site's.
+fn send(
+    address: SocketAddr,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: Option<&Value>,
+) -> (u16, Vec<u8>) {
+    let mut socket = TcpStream::connect(address).unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let body = body.map(Value::to_string).unwrap_or_default();
+    let mut head = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n",
+        body.len()
+    );
+    for (name, value) in headers {
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    write!(socket, "{head}\r\n{body}").unwrap();
+    let mut reader = BufReader::new(socket);
+    let (status, headers) = response_head(&mut reader);
+    let body = if headers.contains("transfer-encoding: chunked") {
+        ChunkedBody::new(reader).rest()
+    } else {
+        let mut body = Vec::new();
+        reader.read_to_end(&mut body).unwrap();
+        body
+    };
+    (status, body)
+}
+
+fn json_body(response: (u16, Vec<u8>), status: u16) -> Value {
+    assert_eq!(
+        response.0,
+        status,
+        "{}",
+        String::from_utf8_lossy(&response.1)
+    );
+    serde_json::from_slice(&response.1).unwrap()
+}
+
+/// Rob saves a prompt version, sees it active, and reverts it, through a
+/// console whose login may write prompt versions and nothing else.
+fn prompts_edit_and_revert_through_the_api(database: &mut Database, assets: &Path) {
+    let settings = database.create("console_prompts");
+    let mut store = Store::open(&settings).unwrap();
+    tl3_controller::prompts::seed(&mut store).unwrap();
+    grant_reader(
+        &settings,
+        "tl3_console_prompts",
+        settings.password_file.as_deref().unwrap(),
+    )
+    .unwrap();
+    let console = tl3_console::start(
+        TcpListener::bind("127.0.0.1:0").unwrap(),
+        tl3_console::Options {
+            store: tl3_config::Store {
+                user: "tl3_console_prompts".into(),
+                ..settings.clone()
+            },
+            assets: assets.into(),
+            models: None,
+        },
+    )
+    .unwrap();
+    let address = console.address();
+    let page = [("X-TL3-Console", "1")];
+    let roles = json_body(send(address, "GET", "/api/prompts", &[], None), 200);
+    let names: Vec<_> = tl3_controller::prompts::BUILTIN
+        .iter()
+        .map(|(role, _)| serde_json::json!({"role": role, "active_number": 1, "active_builtin": true, "builtin_update": false}))
+        .collect();
+    assert_eq!(roles, Value::Array(names));
+    let writer = json_body(send(address, "GET", "/api/prompts/writer", &[], None), 200);
+    let shipped = writer["active"].as_i64().unwrap();
+    let builtin = tl3_controller::prompts::BUILTIN
+        .iter()
+        .find(|(role, _)| *role == "writer")
+        .unwrap()
+        .1;
+    assert_eq!(writer["versions"][0]["text"], builtin);
+    let edit = serde_json::json!({"text": "Write for Rob, briefly.", "note": "Shorter notes.", "base": shipped});
+    let path = "/api/prompts/writer/versions";
+    assert_eq!(send(address, "POST", path, &[], Some(&edit)).0, 403);
+    let other_site = [
+        ("X-TL3-Console", "1"),
+        ("Origin", "http://attacker.invalid"),
+    ];
+    assert_eq!(send(address, "POST", path, &other_site, Some(&edit)).0, 403);
+    let no_note = serde_json::json!({"text": "Write for Rob.", "note": " ", "base": shipped});
+    assert_eq!(send(address, "POST", path, &page, Some(&no_note)).0, 400);
+    let own_site = format!("http://{address}");
+    let saved = json_body(
+        send(
+            address,
+            "POST",
+            path,
+            &[("X-TL3-Console", "1"), ("Origin", &own_site)],
+            Some(&edit),
+        ),
+        201,
+    );
+    let version = &saved["versions"][0];
+    assert_eq!(saved["active"], version["id"]);
+    assert_eq!(
+        (
+            &version["number"],
+            &version["text"],
+            &version["note"],
+            &version["author"],
+            &version["builtin"]
+        ),
+        (
+            &Value::from(2),
+            &Value::from("Write for Rob, briefly."),
+            &Value::from("Shorter notes."),
+            &Value::from("Rob"),
+            &Value::from(false)
+        )
+    );
+    assert_eq!(
+        json_body(send(address, "GET", path, &[], None), 200),
+        saved["versions"]
+    );
+    // An editor opened before the save can't overwrite it.
+    assert_eq!(send(address, "POST", path, &page, Some(&edit)).0, 409);
+    let reverted = json_body(
+        send(
+            address,
+            "POST",
+            &format!("/api/prompts/writer/activate/{shipped}"),
+            &page,
+            None,
+        ),
+        200,
+    );
+    assert_eq!(reverted["active"], shipped);
+    assert_eq!(
+        store
+            .run_prompt("console-run", "writer")
+            .unwrap()
+            .unwrap()
+            .id,
+        shipped,
+        "the next run uses the reverted version"
+    );
+    assert_eq!(
+        send(
+            address,
+            "POST",
+            "/api/prompts/writer/activate/999999",
+            &page,
+            None
+        )
+        .0,
+        404
+    );
+    assert_eq!(
+        send(
+            address,
+            "POST",
+            "/api/prompts/nobody/versions",
+            &page,
+            Some(&edit)
+        )
+        .0,
+        404
+    );
+    // A deploy ships a changed built-in while Rob's version is active.
+    let mine = saved["active"].as_i64().unwrap();
+    json_body(
+        send(
+            address,
+            "POST",
+            &format!("/api/prompts/writer/activate/{mine}"),
+            &page,
+            None,
+        ),
+        200,
+    );
+    store
+        .seed_prompts(&[("writer", "Write, second release.")])
+        .unwrap();
+    let flagged = json_body(send(address, "GET", "/api/prompts/writer", &[], None), 200);
+    assert_eq!(flagged["active"], mine);
+    let update = flagged["builtin_update"].as_i64().unwrap();
+    assert_eq!(flagged["versions"][0]["text"], "Write, second release.");
+    let roles = json_body(send(address, "GET", "/api/prompts", &[], None), 200);
+    let writer = roles
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["role"] == "writer")
+        .unwrap();
+    assert_eq!(writer["builtin_update"], true);
+    let kept = json_body(
+        send(
+            address,
+            "POST",
+            &format!("/api/prompts/writer/keep/{update}"),
+            &page,
+            None,
+        ),
+        200,
+    );
+    assert_eq!(
+        (&kept["active"], &kept["builtin_update"]),
+        (&Value::from(mine), &Value::Null)
+    );
 }
