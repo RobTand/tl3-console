@@ -30,6 +30,7 @@ const COLUMNS: Record<Column, string> = {
   Merging: "Merging",
   NeedsRob: "Needs Rob",
   Done: "Done",
+  Cancelled: "Cancelled",
 };
 
 const ENDINGS: Record<Ending, string> = {

@@ -1,4 +1,4 @@
-// Copied from RobTand/trustladderiii crates/store/tests/support/scratch.rs at d8b561f50a3559f08cb8c9c961e587e58b302158.
+// Copied from RobTand/trustladderiii crates/store/tests/support/scratch.rs at 2220efd9e9e302774b986c69736cdbe338b7c1cc.
 use rustix::{
     io::Errno,
     process::{Pid, geteuid, test_kill_process},

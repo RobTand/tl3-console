@@ -65,12 +65,20 @@ export type CardIncident = { id: string, summary: string, };
 
 /**
  * A workflow stage on the board, in board order.
+ *
+ * Backlog holds requests that wait for Rob. A request that ended as Stopped
+ * is one: its issue stays open (Q49) until he restarts it. A restart files a
+ * newer request, which replaces the stopped one on the board.
+ *
+ * **Auto-pickup (#334) must never start a stopped request by itself.** Only
+ * Rob's restart does. Auto-pickup draws from the backlog index, not from
+ * this column.
  */
-export type Column = "Backlog" | "Intake" | "Planning" | "Making" | "Checking" | "Reviewing" | "Merging" | "NeedsRob" | "Done";
+export type Column = "Backlog" | "Intake" | "Planning" | "Making" | "Checking" | "Reviewing" | "Merging" | "NeedsRob" | "Done" | "Cancelled";
 
 export type ColumnCount = { column: Column, label: string, count: number, };
 
-export type Badge = "Paused" | "Incident" | "MakerBlocked" | "NeedsRob" | "WaitingForCapacity";
+export type Badge = "Paused" | "Incident" | "MakerBlocked" | "NeedsRob" | "WaitingForCapacity" | "Stopped";
 
 /**
  * How a request ended, or is ending while it cleans up.
@@ -83,7 +91,7 @@ export type Flow = {
  */
 columns: Array<ColumnCount>, 
 /**
- * Requests that haven't reached Done.
+ * Requests that are still moving: not Backlog, Done or Cancelled.
  */
 in_flight: number, 
 /**

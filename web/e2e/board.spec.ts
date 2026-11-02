@@ -25,12 +25,33 @@ test("a controller commit moves a card on the open board", async ({ page }) => {
   }
 });
 
+test("a stopped request waits in the backlog, and cancelled work is not done", async ({ page }) => {
+  const fixture = await startFixture();
+  try {
+    await page.goto(fixture.url);
+    const card = (region: string, issue: number) =>
+      page.getByRole("region", { name: region }).getByRole("article", { name: new RegExp(`tl3-sandbox#${issue}:`) });
+    // Rob stopped this request; its issue stays open, so he can restart it.
+    const stopped = card("Backlog", 46);
+    await expect(stopped.getByRole("list", { name: "Badges" })).toHaveText("Stopped");
+    await stopped.getByRole("button", { name: "Actions" }).click();
+    await expect(page.getByRole("menuitem", { name: "Restart" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    // A duplicate is cancelled. Work that already exists is done.
+    await expect(card("Cancelled", 44).getByText("Duplicate", { exact: true })).toBeVisible();
+    await expect(card("Done", 45).getByText("Already done", { exact: true })).toBeVisible();
+    await expect(card("Done", 46)).toHaveCount(0);
+  } finally {
+    await fixture.stop();
+  }
+});
+
 test("board screenshots in both themes", async ({ page }) => {
   test.skip(!process.env.TL3_SCREENSHOTS, "set TL3_SCREENSHOTS to a directory to record them");
   const fixture = await startFixture();
   try {
     // Wide enough to show every column.
-    await page.setViewportSize({ width: 2720, height: 1100 });
+    await page.setViewportSize({ width: 3100, height: 1100 });
     for (const scheme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme: scheme });
       await page.goto(fixture.url);

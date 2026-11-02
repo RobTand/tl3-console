@@ -23,7 +23,7 @@ use tl3_controller::{
     board::{self, Column},
     executor::{Completion, Delivery, Executor, Observation, Output, Reconciliation, Upstream},
 };
-use tl3_kernel::{Command, EffectKind, Event, Fact, NodeId, Reply, Role};
+use tl3_kernel::{Command, EarlyEnd, EffectKind, Event, Fact, NodeId, Reply, Role};
 use tl3_store::{Reader, Store};
 
 const REPOS: [&str; 4] = ["tl3-sandbox", "prismabuild", "prismaquant", "tessera"];
@@ -60,6 +60,12 @@ const NEEDS_ROB: u64 = 2;
 const FIX_ROUND: u64 = 5;
 /// The issue whose effect-failed question Rob can leave to TL3.
 const DEFERRABLE: u64 = 43;
+/// Requests the reader ends early: a duplicate, which is cancelled, and work
+/// that already exists, which is done.
+const DUPLICATE: u64 = 44;
+const ALREADY_DONE: u64 = 45;
+/// A request Rob stops while the reader still works on it.
+const STOPPED: u64 = 46;
 
 /// The simulated workers, with scripted replies for two seeded requests.
 struct Workers {
@@ -81,6 +87,20 @@ impl Executor for Workers {
             return self.fake.execute(delivery);
         };
         let generation = delivery.generation;
+        let early_end = match delivery.issue {
+            DUPLICATE => Some(EarlyEnd::Duplicate),
+            ALREADY_DONE => Some(EarlyEnd::AlreadyDone),
+            _ => None,
+        };
+        if let (Role::Ingest, Some(early_end)) = (role, early_end) {
+            return Ok(Completion::confirmed(vec![Observation::Kernel(
+                Event::Reply {
+                    node,
+                    generation,
+                    reply: Reply::IngestEarlyEnd(early_end),
+                },
+            )]));
+        }
         let name = match role {
             Role::Make => "maker",
             Role::Review => "reviewer",
@@ -203,6 +223,48 @@ fn main() {
         ))
         .unwrap();
     while column(&settings, "tl3-sandbox", DEFERRABLE) != Column::NeedsRob
+        && controller.drive_once().unwrap()
+    {}
+    for (number, title, ends_in) in [
+        (
+            DUPLICATE,
+            "Add the console's board to the status page",
+            Column::Cancelled,
+        ),
+        (
+            ALREADY_DONE,
+            "Show merge counts on the flow strip",
+            Column::Done,
+        ),
+    ] {
+        controller
+            .intake(issue("tl3-sandbox", number, title))
+            .unwrap();
+        while column(&settings, "tl3-sandbox", number) != ends_in
+            && controller.drive_once().unwrap()
+        {}
+    }
+    controller
+        .intake(issue(
+            "tl3-sandbox",
+            STOPPED,
+            "Rename the kernel cache index",
+        ))
+        .unwrap();
+    let stopped = controller.world().unwrap().nodes.len() as u64 - 1;
+    controller
+        .observe(
+            "fixture-stopped",
+            Observation::Kernel(Event::Command {
+                node: NodeId(stopped),
+                id: 1,
+                command: Command::Stop,
+            }),
+        )
+        .unwrap();
+    while !controller.world().unwrap().nodes[stopped as usize]
+        .phase
+        .is_closed()
         && controller.drive_once().unwrap()
     {}
     controller
