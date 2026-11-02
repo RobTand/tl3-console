@@ -32,6 +32,7 @@ fn main() {
             store: reader.clone(),
             assets: assets.path().into(),
             models: None,
+            links: Default::default(),
         },
     )
     .unwrap();
@@ -500,6 +501,7 @@ fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
             store: settings.clone(),
             assets: assets.into(),
             models: None,
+            links: Default::default(),
         },
     )
     .unwrap();
@@ -535,6 +537,7 @@ fn start_console(settings: &tl3_config::Store, assets: &Path) -> tl3_console::Ru
             store: settings.clone(),
             assets: assets.into(),
             models: None,
+            links: Default::default(),
         },
     )
     .unwrap()
@@ -661,6 +664,7 @@ fn cards_follow_the_quota_fallback(settings: &tl3_config::Store, assets: &Path) 
             store: settings.clone(),
             assets: assets.into(),
             models: Some(config.models),
+            links: Default::default(),
         },
     )
     .unwrap();
