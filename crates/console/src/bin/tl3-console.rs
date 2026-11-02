@@ -23,7 +23,7 @@ fn run() -> tl3_console::Result<()> {
     let settings = Settings::load(path)?;
     if check {
         // Deploy runs this with the new binary before it replaces the old one.
-        tl3_console::check(&settings.store)?;
+        let _ = tl3_console::check(&settings.store)?;
         println!("Console config loads and the store's schema matches the pinned TL3");
         return Ok(());
     }

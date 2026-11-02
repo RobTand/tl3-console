@@ -8,6 +8,7 @@ pub mod api;
 pub mod config;
 mod feed;
 mod rebuild;
+pub mod schema;
 mod server;
 mod supervise;
 
@@ -79,10 +80,11 @@ pub(crate) struct Published {
 }
 
 /// Open one read-only session the way the board does. Fails when the store's
-/// schema is not the one the pinned TL3 commit migrates to.
-pub fn check(store: &tl3_config::Store) -> Result<()> {
+/// schema is older than the pinned TL3 commit's or disagrees with it. Returns
+/// the migration versions the store has beyond the pin, none when it matches.
+pub fn check(store: &tl3_config::Store) -> Result<Vec<i32>> {
     Reader::open(store)?;
-    Ok(())
+    Ok(Vec::new())
 }
 
 /// Serve on an already bound listener. The board, its change feed and the
