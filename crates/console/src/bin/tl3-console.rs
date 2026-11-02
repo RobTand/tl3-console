@@ -40,6 +40,7 @@ fn run() -> tl3_console::Result<()> {
             models: Some(settings.models),
             links: settings.links,
             public_hosts: settings.public_hosts,
+            hidden: settings.hidden,
         },
     )?;
     println!("Console listening on http://{}", running.address());

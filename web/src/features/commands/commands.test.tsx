@@ -220,6 +220,28 @@ describe("DeferAll", () => {
   });
 });
 
+describe("DeferAll links", () => {
+  it("links each request to its issue on GitHub", async () => {
+    const user = userEvent.setup();
+    const cards = [
+      card({ id: 1, issue: 101, column: "NeedsRob", question: EFFECT_FAILED, title: "Fix the build" }),
+      card({ id: 2, issue: 7, repo: "RobTand/prismaquant", column: "NeedsRob", question: EFFECT_FAILED }),
+    ];
+    setup(<DeferAll cards={cards} />);
+    await user.click(screen.getByRole("button", { name: "Let TL3 decide on all" }));
+    const dialog = screen.getByRole("dialog", { name: "Let TL3 decide on all" });
+    for (const { name, href } of [
+      { name: "tl3-sandbox#101", href: "https://github.com/RobTand/tl3-sandbox/issues/101" },
+      { name: "prismaquant#7", href: "https://github.com/RobTand/prismaquant/issues/7" },
+    ]) {
+      const link = within(dialog).getByRole("link", { name });
+      expect(link).toHaveAttribute("href", href);
+      expect(link).toHaveAttribute("target", "_blank");
+    }
+    expect(dialog.querySelector("button a")).toBeNull();
+  });
+});
+
 describe("focus", () => {
   it("moves into the confirmation, and back to the action on cancel or confirm", async () => {
     const user = userEvent.setup();

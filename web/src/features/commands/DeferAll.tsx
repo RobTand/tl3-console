@@ -1,6 +1,7 @@
 import { Dialog } from "radix-ui";
 import { useState } from "react";
 import type { Card } from "../../api/types.gen";
+import { IssueLink } from "../../components/IssueLink";
 import { useCommands } from "./commands";
 
 /**
@@ -37,9 +38,7 @@ export function DeferAll({ cards, filtered = false }: { cards: Card[]; filtered?
               return (
                 <li key={card.id} className="rounded border border-border px-2.5 py-2 text-xs">
                   <p className="text-text">
-                    <span className="font-mono text-faint">
-                      {card.repo.split("/")[1] ?? card.repo}#{card.issue}
-                    </span>{" "}
+                    <IssueLink repo={card.repo} issue={card.issue} short className="text-muted" />{" "}
                     {card.title}
                   </p>
                   {question.defer_blocked === null ? (
