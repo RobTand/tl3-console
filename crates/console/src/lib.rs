@@ -104,6 +104,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         store: store.clone(),
         models: models.clone().map(Arc::new),
         links: Arc::new(links),
+        sessions: sessions::Sessions::new(case_file::SESSIONS),
     };
     {
         let (store, rebuilds, connected) = (store.clone(), rebuilds.clone(), connected.clone());

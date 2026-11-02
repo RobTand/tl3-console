@@ -1,5 +1,5 @@
 import { Dialog } from "radix-ui";
-import { useId, type ReactNode } from "react";
+import { useId, type ReactElement, type ReactNode } from "react";
 import type {
   BlockedReport,
   Card,
@@ -60,6 +60,7 @@ const TIME = new Intl.DateTimeFormat("en-GB", {
   day: "numeric",
   hour: "2-digit",
   minute: "2-digit",
+  second: "2-digit",
   hour12: false,
 });
 
@@ -107,16 +108,18 @@ function Disclosure(props: { label: string; children: ReactNode }) {
   );
 }
 
-function Header({ card, links }: { card: Card; links: Link[] }) {
+function Header(props: { card: Card; links: Link[]; title: (heading: ReactElement) => ReactElement }) {
+  const { card, links } = props;
   return (
-    <header className="px-4 pt-4 pb-3">
+    // The right padding keeps a long title clear of the drawer's close button.
+    <header className="pt-4 pr-12 pb-3 pl-4">
       <p className="flex items-center gap-1.5 text-2xs text-muted">
         <span>{card.repo}</span>
         <span className="font-mono text-faint">#{card.issue}</span>
         <Chip tone="bg-surface-2 text-muted">{COLUMNS[card.column]}</Chip>
         {card.ending !== null && <Chip tone="bg-surface-2 text-muted">{ENDINGS[card.ending]}</Chip>}
       </p>
-      <h2 className="mt-1 text-base font-semibold text-text">{card.title}</h2>
+      {props.title(<h2 className="mt-1 text-base font-semibold text-text">{card.title}</h2>)}
       <p className="mt-1 text-xs text-text">
         {card.phase}
         {card.waiting_on !== "none" && <span className="text-muted"> · waiting on {card.waiting_on}</span>}
@@ -146,7 +149,8 @@ function Header({ card, links }: { card: Card; links: Link[] }) {
 function Counters({ card }: { card: Card }) {
   const counters: Array<[string, ReactNode]> = [
     ["Attempt", card.attempt],
-    ["Fix rounds", card.round],
+    // The kernel's round is 1 while a review's findings are being fixed.
+    ["In a fix round", card.round > 0 ? "Yes" : "No"],
     ["Plan retries", card.retries.plan],
     ["Audit rounds", card.retries.audit],
     ["Run failures", card.retries.run_failures],
@@ -385,10 +389,16 @@ function Summary({ summary }: { summary: ClosingSummary }) {
 }
 
 /** A request's case file. Evidence and model text sit behind disclosures. */
-export function CaseFileView({ file, now }: { file: CaseFile; now: number }) {
+export function CaseFileView(props: {
+  file: CaseFile;
+  now: number;
+  /** Wraps the title heading, so a dialog can be named by it. */
+  title?: (heading: ReactElement) => ReactElement;
+}) {
+  const { file, now } = props;
   return (
     <article className="text-text">
-      <Header card={file.card} links={file.links} />
+      <Header card={file.card} links={file.links} title={props.title ?? ((heading) => heading)} />
       <Counters card={file.card} />
       {file.question !== null && <Question question={file.question} />}
       <Timeline timeline={file.timeline} />
@@ -405,8 +415,6 @@ export function CaseFileView({ file, now }: { file: CaseFile; now: number }) {
 export function CaseDrawer(props: { id: number | null; card: Card | undefined; now: number; onClose: () => void }) {
   const { file, error } = useCaseFile(props.id, props.card);
   const shown = file?.card.id === props.id ? file : undefined;
-  const card = shown?.card ?? props.card;
-  const name = card ? `${card.repo}#${card.issue}: ${card.title}` : `Request ${props.id}`;
   return (
     <Dialog.Root open={props.id !== null} onOpenChange={(open) => !open && props.onClose()}>
       <Dialog.Portal>
@@ -415,7 +423,6 @@ export function CaseDrawer(props: { id: number | null; card: Card | undefined; n
           aria-describedby={undefined}
           className="fixed inset-y-0 right-0 flex w-full max-w-[720px] flex-col border-l border-border bg-surface shadow-lg outline-none"
         >
-          <Dialog.Title className="sr-only">{name}</Dialog.Title>
           <Dialog.Close
             aria-label="Close the case file"
             className="absolute top-3 right-3 inline-flex size-7 items-center justify-center rounded text-muted hover:bg-surface-2 hover:text-text"
@@ -431,9 +438,15 @@ export function CaseDrawer(props: { id: number | null; card: Card | undefined; n
               </p>
             )}
             {shown ? (
-              <CaseFileView file={shown} now={props.now} />
+              <CaseFileView
+                file={shown}
+                now={props.now}
+                title={(heading) => <Dialog.Title asChild>{heading}</Dialog.Title>}
+              />
             ) : (
-              error === null && <p className="px-4 pt-12 text-sm text-muted">Reading the case file…</p>
+              <Dialog.Title className="px-4 pt-12 text-sm font-normal text-muted">
+                {error === null ? "Reading the case file…" : "Case file unavailable"}
+              </Dialog.Title>
             )}
           </div>
         </Dialog.Content>

@@ -4,17 +4,19 @@
 //! built from stored keys.
 
 mod route;
-pub(crate) use route::{CaseFiles, routes};
+pub(crate) use route::{CaseFiles, SESSIONS, routes};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use tl3_controller::{
-    board::{self, Card, Column, Ending, Request, Rows},
+    board::{self, Card, Column, Ending, Request},
     executor::{Completion, Delivery, Observation, Output, Upstream},
     looks::Cause,
 };
 use tl3_kernel::{
-    Ack, Answer, Command, EarlyEnd, EffectKind, Event, Fact, Notice, Phase, QKind, Reply, Role,
+    Ack, Answer, Command, EarlyEnd, EffectKind, Event, Fact, Node, NodeId, Notice, Phase, QKind,
+    Reply, Role,
 };
 use tl3_store::Transaction;
 use ts_rs::TS;
@@ -206,7 +208,8 @@ impl Links {
 }
 
 /// Build request `id`'s case file inside the caller's read transaction.
-/// None when no request has that id.
+/// None when no request has that id. Every read goes by key or through an
+/// index, so its cost doesn't grow with the rest of the store.
 pub fn read(
     tx: &mut Transaction<'_>,
     id: u64,
@@ -214,43 +217,217 @@ pub fn read(
     models: Option<&tl3_config::Models>,
     links: &Links,
 ) -> crate::Result<Option<CaseFile>> {
-    let rows = Rows::read(tx)?;
-    let Some(request) = rows.requests.iter().find(|request| request.id.0 == id) else {
+    let Some(stored) = Stored::read(tx, id)? else {
         return Ok(None);
     };
-    let card = card(&rows, request, now_ms, models);
-    let key = id.to_string();
-    let effects = effects(tx, &key)?;
+    let revision: i64 = tx
+        .query_one("SELECT revision FROM tl3_meta", &[])
+        .map_err(tl3_store::Error::from)?
+        .get(0);
+    let quota_resets = quota_resets(tx)?;
+    let card = card(revision, &quota_resets, &stored.request, now_ms, models);
+    let effects = effects(tx, &stored)?;
     let (runs, blocked) = runs(&effects, models, links, &card)?;
     Ok(Some(CaseFile {
-        revision: rows.revision,
-        timeline: timeline(tx, &key, &effects, &card)?,
-        children: children(tx, &key, &rows, now_ms)?,
+        revision,
+        timeline: timeline(&stored, &effects, &card),
+        children: children(tx, id, revision, &quota_resets, now_ms)?,
         runs,
-        incidents: incidents(tx, &key)?,
         blocked,
-        question: question(request, &effects)?,
-        summary: summary(request, &card, &effects)?,
-        links: request_links(tx, request, links)?,
+        question: question(&stored.request, &effects)?,
+        summary: summary(&stored.request, &card, &effects)?,
+        links: request_links(tx, &stored.request, links)?,
+        incidents: stored.incidents,
         card,
     }))
 }
 
+/// One request's rows, read by key.
+struct Stored {
+    request: Request,
+    incidents: Vec<CaseIncident>,
+    last_change: LastChange,
+}
+
+/// The commit that last changed the node.
+struct LastChange {
+    revision: i64,
+    at_ms: i64,
+    event_key: String,
+    result: Value,
+    /// Whether that commit also moved the node into its current phase.
+    entered_phase: bool,
+}
+
+impl Stored {
+    fn read(tx: &mut Transaction<'_>, id: u64) -> crate::Result<Option<Stored>> {
+        let key = id.to_string();
+        let tables = ["nodes", "requests", "maker_session", "worker_failures"];
+        let (mut node, mut version, mut binding) = (None, 0, None);
+        let (mut session, mut failure) = (Value::Null, Value::Null);
+        for row in tx
+            .query(
+                "SELECT table_name, value, version FROM tl3_world
+                 WHERE table_name = ANY($1) AND row_id = $2",
+                &[&tables.as_slice(), &key],
+            )
+            .map_err(tl3_store::Error::from)?
+        {
+            let value: Value = row.get(1);
+            match row.get::<_, &str>(0) {
+                "nodes" => {
+                    node = Some(serde_json::from_value::<Node>(value)?);
+                    version = row.get(2);
+                }
+                "requests" => binding = Some(value),
+                "maker_session" => session = value,
+                _ => failure = value,
+            }
+        }
+        let (Some(node), Some(binding)) = (node, binding) else {
+            return Ok(None);
+        };
+        let change = tx
+            .query_one(
+                "SELECT (extract(epoch FROM phases.since) * 1000)::bigint,
+                        events.committed_at = phases.since, events.event_key, events.result,
+                        (extract(epoch FROM events.committed_at) * 1000)::bigint
+                 FROM tl3_events events LEFT JOIN tl3_node_phases phases ON phases.node_id = $2
+                 WHERE events.revision = $1",
+                &[&version, &key],
+            )
+            .map_err(tl3_store::Error::from)?;
+        let progress = tx
+            .query_opt(
+                "SELECT COALESCE(active.unit, summary.unit),
+                        CASE WHEN active.unit IS NOT NULL THEN active.last_progress_ms
+                             ELSE summary.last_progress_ms END
+                 FROM (SELECT 1) one
+                 LEFT JOIN LATERAL (
+                     SELECT unit, last_progress_ms FROM tl3_worker_progress
+                     WHERE node_id = $1 ORDER BY started_ms DESC, run_key LIMIT 1
+                 ) active ON true
+                 LEFT JOIN tl3_worker_summary summary ON summary.node_id = $1",
+                &[&key],
+            )
+            .map_err(tl3_store::Error::from)?
+            .and_then(|row| {
+                Some(board::Progress {
+                    at_ms: row.get::<_, Option<i64>>(1)?,
+                    model_turn: row.get::<_, Option<String>>(0).as_deref() == Some("model_turn"),
+                })
+            });
+        // RunFailed advances the generation before the board reads the failure.
+        let worker_failure = (failure["generation"]
+            .as_u64()
+            .and_then(|n| n.checked_add(1))
+            == Some(node.generation))
+        .then(|| board::WorkerFailure {
+            class: failure["failure_class"]
+                .as_str()
+                .unwrap_or("unknown")
+                .into(),
+            message: failure["failure_message"]
+                .as_str()
+                .unwrap_or("worker run failed")
+                .into(),
+        });
+        let question_post_failed = match node.question {
+            Some(question) => tx
+                .query_one(
+                    "SELECT EXISTS (SELECT 1 FROM tl3_world WHERE table_name = 'notice_failures'
+                         AND value #>> '{delivery,output,Notice,node}' = $1
+                         AND value #>> '{delivery,output,Notice,notice,Ask,question}' = $2)",
+                    &[&key, &question.id.to_string()],
+                )
+                .map_err(tl3_store::Error::from)?
+                .get(0),
+            None => false,
+        };
+        let stored = incidents(tx, &key)?;
+        let open = stored
+            .iter()
+            .filter(|incident| incident.open)
+            .map(|incident| board::StoredIncident {
+                id: incident.id.clone(),
+                summary: incident.summary.clone(),
+                maker_blocked: incident.signature.class == "environment_blocked",
+            })
+            .collect();
+        let field = |name: &str| {
+            binding["repo"][name]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let request = Request {
+            id: NodeId(id),
+            repo: format!("{}/{}", field("owner"), field("name")),
+            issue: binding["issue"].as_u64().unwrap_or_default(),
+            title: binding["title"].as_str().unwrap_or_default().into(),
+            question_post_failed,
+            phase_since_ms: change.get(0),
+            progress,
+            worker_failure,
+            incidents: open,
+            // The worker adapter reads the same session for this attempt.
+            maker_model: (session["attempt"] == node.attempt
+                && session["replanned"] == node.replanned)
+                .then(|| session["model"].as_str().map(str::to_owned))
+                .flatten(),
+            node,
+        };
+        Ok(Some(Stored {
+            request,
+            incidents: stored.into_iter().map(case_incident).collect(),
+            last_change: LastChange {
+                revision: version,
+                at_ms: change.get(4),
+                entered_phase: change.get::<_, Option<bool>>(1) == Some(true),
+                event_key: change.get(2),
+                result: change.get(3),
+            },
+        }))
+    }
+}
+
+/// Q53: models that reported quota, with their announced resets.
+fn quota_resets(tx: &mut Transaction<'_>) -> crate::Result<BTreeMap<String, u64>> {
+    Ok(tx
+        .query(
+            "SELECT row_id, value FROM tl3_world WHERE table_name = 'model_quotas'",
+            &[],
+        )
+        .map_err(tl3_store::Error::from)?
+        .into_iter()
+        .filter_map(|row| {
+            let value: Value = row.get(1);
+            Some((row.get(0), value["reset_ms"].as_u64()?))
+        })
+        .collect())
+}
+
 /// The request's card, from the board's own projection. The board drops
 /// closed requests after a day; projecting at the close keeps them here.
-fn card(rows: &Rows, request: &Request, now_ms: i64, models: Option<&tl3_config::Models>) -> Card {
+fn card(
+    revision: i64,
+    quota_resets: &BTreeMap<String, u64>,
+    request: &Request,
+    now_ms: i64,
+    models: Option<&tl3_config::Models>,
+) -> Card {
     let mut shown = request.clone();
     let now_ms = match request.node.phase {
         Phase::Closed(_) => *shown.phase_since_ms.get_or_insert(now_ms),
         _ => now_ms,
     };
     let mut card = board::project(board::Input {
-        revision: rows.revision,
+        revision,
         now_ms,
         requests: vec![shown],
         unassigned_incidents: Vec::new(),
         models,
-        quota_resets: rows.quota_resets.clone(),
+        quota_resets: quota_resets.clone(),
     })
     .cards
     .remove(0);
@@ -272,7 +449,37 @@ struct Effect {
     completion: Option<Completion>,
 }
 
-fn effects(tx: &mut Transaction<'_>, node: &str) -> crate::Result<Vec<Effect>> {
+/// TL3 numbers a commit's notices from 0 (`notice:<revision>:<index>`). A
+/// commit that steps many nodes at once could number past this; such a
+/// notice would be missing here.
+const NOTICE_SLOTS: usize = 64;
+
+/// The request's effects, by key: `effect:<node>:<seq>` for every sequence
+/// the node has used, and the notices of the commits that asked its current
+/// question and closed it.
+fn effects(tx: &mut Transaction<'_>, stored: &Stored) -> crate::Result<Vec<Effect>> {
+    let node = &stored.request.node;
+    let id = stored.request.id;
+    let mut keys: Vec<String> = (0..node.next_seq)
+        .map(|seq| format!("effect:{}:{seq}", id.0))
+        .collect();
+    let mut notices = Vec::new();
+    if let Some(question) = node.question
+        && let Some(row) = tx
+            .query_opt(
+                "SELECT version FROM tl3_world WHERE table_name = 'question_context' AND row_id = $1",
+                &[&question.id.to_string()],
+            )
+            .map_err(tl3_store::Error::from)?
+    {
+        notices.push(row.get::<_, i64>(0));
+    }
+    if matches!(node.phase, Phase::Stopping(_) | Phase::Closed(_)) {
+        notices.push(stored.last_change.revision);
+    }
+    for revision in notices {
+        keys.extend((0..NOTICE_SLOTS).map(|index| format!("notice:{revision}:{index}")));
+    }
     let rows = tx
         .query(
             "SELECT effect.effect_key, effect.payload, effect.state::text, effect.created_revision,
@@ -283,32 +490,36 @@ fn effects(tx: &mut Transaction<'_>, node: &str) -> crate::Result<Vec<Effect>> {
              FROM tl3_effects effect
              JOIN tl3_events created ON created.revision = effect.created_revision
              JOIN tl3_events updated ON updated.revision = effect.updated_revision
-             WHERE COALESCE(effect.payload #>> '{output,Effect,node}',
-                            effect.payload #>> '{output,Notice,node}') = $1
+             WHERE effect.effect_key = ANY($1)
              ORDER BY effect.created_revision, effect.effect_key",
-            &[&node],
+            &[&keys],
         )
         .map_err(tl3_store::Error::from)?;
-    rows.into_iter()
-        .map(|row| {
-            let key: String = row.get(0);
-            let event: String = row.get(8);
-            let completion = event
-                .starts_with(&format!("completion:{key}:"))
-                .then(|| serde_json::from_value(row.get(9)))
-                .transpose()?;
-            Ok(Effect {
-                delivery: serde_json::from_value(row.get(1))?,
-                key,
-                state: row.get(2),
-                created_revision: row.get(3),
-                created_ms: row.get(4),
-                created_by: (row.get(5), row.get(6)),
-                updated_ms: row.get(7),
-                completion,
-            })
-        })
-        .collect()
+    let mut effects = Vec::with_capacity(rows.len());
+    for row in rows {
+        let key: String = row.get(0);
+        let delivery: Delivery = serde_json::from_value(row.get(1))?;
+        // A notice slot can belong to another node stepped in the same commit.
+        if delivery.node() != id {
+            continue;
+        }
+        let event: String = row.get(8);
+        let completion = event
+            .starts_with(&format!("completion:{key}:"))
+            .then(|| serde_json::from_value(row.get(9)))
+            .transpose()?;
+        effects.push(Effect {
+            delivery,
+            key,
+            state: row.get(2),
+            created_revision: row.get(3),
+            created_ms: row.get(4),
+            created_by: (row.get(5), row.get(6)),
+            updated_ms: row.get(7),
+            completion,
+        });
+    }
+    Ok(effects)
 }
 
 /// The stage each step moved the request to, and the step's name. Steps
@@ -346,12 +557,7 @@ fn step(output: Output) -> Option<(Column, &'static str)> {
 /// Stage changes from the audit event log: each step the kernel started, at
 /// the commit that started it, with that commit's kernel event as the cause.
 /// A repeated step, such as a retried run, adds nothing.
-fn timeline(
-    tx: &mut Transaction<'_>,
-    node: &str,
-    effects: &[Effect],
-    card: &Card,
-) -> crate::Result<Vec<StageChange>> {
+fn timeline(stored: &Stored, effects: &[Effect], card: &Card) -> Vec<StageChange> {
     let mut timeline: Vec<StageChange> = Vec::new();
     for effect in effects {
         let Some((column, step)) = step(effect.delivery.output) else {
@@ -371,32 +577,30 @@ fn timeline(
             cause: cause(&effect.created_by.0, &effect.created_by.1, effects),
         });
     }
-    // Where the request is now, when no step took it there: Ready, a pause, or closed.
+    // Where the request is now, when no step took it there: Ready, a pause,
+    // or closed. The node's last change is the cause only if it also moved
+    // the node into this phase.
+    let last = &stored.last_change;
     if timeline
         .last()
-        .is_none_or(|last| last.column != card.column || card.ending.is_some())
-        && let Some(row) = tx
-            .query_opt(
-                "SELECT events.revision, (extract(epoch FROM events.committed_at) * 1000)::bigint,
-                        events.event_key, events.result
-                 FROM tl3_node_phases phases JOIN tl3_events events ON events.committed_at = phases.since
-                 WHERE phases.node_id = $1",
-                &[&node],
-            )
-            .map_err(tl3_store::Error::from)?
+        .is_none_or(|entry| entry.column != card.column || card.ending.is_some())
+        && timeline
+            .last()
+            .is_none_or(|entry| entry.revision <= last.revision)
     {
-        let revision: i64 = row.get(0);
-        if timeline.last().is_none_or(|last| last.revision <= revision) {
-            timeline.push(StageChange {
-                revision,
-                at_ms: row.get(1),
-                column: card.column,
-                step: card.phase.clone(),
-                cause: cause(row.get(2), &row.get(3), effects),
-            });
-        }
+        timeline.push(StageChange {
+            revision: last.revision,
+            at_ms: stored.request.phase_since_ms.unwrap_or(last.at_ms),
+            column: card.column,
+            step: card.phase.clone(),
+            cause: if last.entered_phase {
+                cause(&last.event_key, &last.result, effects)
+            } else {
+                "Not recorded: the request changed again after entering this stage".into()
+            },
+        });
     }
-    Ok(timeline)
+    timeline
 }
 
 /// What moved the request, from the commit's recorded kernel event.
@@ -555,7 +759,7 @@ fn runs(
                         blocked.push(BlockedReport {
                             generation: Some(generation),
                             evidence: cited(&reply["evidence"]),
-                            report: reply["report"].as_str().map(plain),
+                            report: reply["report"].as_str().map(plain_text),
                         });
                     }
                     result = Some(reply_outcome(name, reply));
@@ -765,58 +969,62 @@ struct Signature {
     class: String,
 }
 
-fn incidents(tx: &mut Transaction<'_>, node: &str) -> crate::Result<Vec<CaseIncident>> {
-    let rows = tx
-        .query(
-            "SELECT value FROM tl3_world WHERE table_name = 'incidents' AND value->>'node' = $1
-             ORDER BY value->>'open' = 'true' DESC, arrival",
-            &[&node],
-        )
-        .map_err(tl3_store::Error::from)?;
-    rows.into_iter()
-        .map(|row| {
-            let incident: StoredIncident = serde_json::from_value(row.get(0))?;
-            // Incidents from before Q51 store no cause. TL3 derives it the same
-            // way (looks::Incident::cause): workers and local worktrees are TL3's.
-            let tl3 = match incident.cause {
-                Some(cause) => cause == Cause::Tl3,
-                None => {
-                    incident.input_failure.is_none()
-                        && match incident.signature.upstream {
-                            Upstream::Workers => true,
-                            Upstream::Worktrees => !matches!(
-                                incident.signature.class.as_str(),
-                                "git_remote" | "invalid_token"
-                            ),
-                            _ => false,
-                        }
+/// The request's incidents, open first. TL3 keeps cleared incidents with
+/// `open` false. The read walks the incidents table by its key prefix.
+fn incidents(tx: &mut Transaction<'_>, node: &str) -> crate::Result<Vec<StoredIncident>> {
+    tx.query(
+        "SELECT value FROM tl3_world WHERE table_name = 'incidents' AND value->>'node' = $1
+         ORDER BY value->>'open' = 'true' DESC, arrival",
+        &[&node],
+    )
+    .map_err(tl3_store::Error::from)?
+    .into_iter()
+    .map(|row| Ok(serde_json::from_value(row.get(0))?))
+    .collect()
+}
+
+fn case_incident(incident: StoredIncident) -> CaseIncident {
+    // Incidents from before Q51 store no cause. TL3 derives it the same way
+    // (looks::Incident::cause): workers and local worktrees are TL3's.
+    let tl3 = match incident.cause {
+        Some(cause) => cause == Cause::Tl3,
+        None => {
+            incident.input_failure.is_none()
+                && match incident.signature.upstream {
+                    Upstream::Workers => true,
+                    Upstream::Worktrees => !matches!(
+                        incident.signature.class.as_str(),
+                        "git_remote" | "invalid_token"
+                    ),
+                    _ => false,
                 }
-            };
-            Ok(CaseIncident {
-                cause: if tl3 {
-                    IncidentCause::Tl3
-                } else {
-                    IncidentCause::Outside
-                },
-                summary: plain(&incident.summary),
-                id: incident.id,
-                open: incident.open,
-                needs_rob: incident.needs_rob,
-                blocking: incident.blocking,
-                source: incident.signature.upstream.kind().into(),
-                class: plain(&incident.signature.class),
-                effect: incident.effect,
-            })
-        })
-        .collect()
+        }
+    };
+    CaseIncident {
+        cause: if tl3 {
+            IncidentCause::Tl3
+        } else {
+            IncidentCause::Outside
+        },
+        summary: plain(&incident.summary),
+        id: incident.id,
+        open: incident.open,
+        needs_rob: incident.needs_rob,
+        blocking: incident.blocking,
+        source: incident.signature.upstream.kind().into(),
+        class: plain(&incident.signature.class),
+        effect: incident.effect,
+    }
 }
 
 fn children(
     tx: &mut Transaction<'_>,
-    node: &str,
-    rows: &Rows,
+    id: u64,
+    revision: i64,
+    quota_resets: &BTreeMap<String, u64>,
     now_ms: i64,
 ) -> crate::Result<Vec<ChildItem>> {
+    let node = id.to_string();
     let mut children = Vec::new();
     if let Some(row) = tx
         .query_opt(
@@ -852,15 +1060,17 @@ fn children(
         )
         .map_err(tl3_store::Error::from)?
     {
-        let id: String = row.get(0);
-        let Some(child) = rows
-            .requests
-            .iter()
-            .find(|request| request.id.0.to_string() == id)
+        let Some(child) = row
+            .get::<_, &str>(0)
+            .parse()
+            .ok()
+            .map(|child| Stored::read(tx, child))
+            .transpose()?
+            .flatten()
         else {
             continue;
         };
-        let shown = card(rows, child, now_ms, None);
+        let shown = card(revision, quota_resets, &child.request, now_ms, None);
         children.push(ChildItem {
             id: Some(shown.id),
             title: shown.title,
@@ -902,15 +1112,15 @@ fn question(request: &Request, effects: &[Effect]) -> crate::Result<Option<Pendi
     let asked = effects.iter().rev().find(|effect| {
         matches!(effect.delivery.output, Output::Notice { notice: asked, .. } if asked == notice)
     });
-    let facts = match asked {
-        Some(effect) => notice_facts(request, effect, notice)?,
-        None => Value::Null,
-    };
+    // A record the writer can't read costs only this section, not the case file.
+    let facts = asked.and_then(|effect| notice_facts(request, effect, notice).ok());
+    let found = facts.is_some();
+    let facts = facts.unwrap_or_default();
     let text = |name: &str| plain(facts[name].as_str().unwrap_or_default());
     Ok(Some(PendingQuestion {
         id: question.id,
         kind: kind.into(),
-        obstacle: if asked.is_some() {
+        obstacle: if found {
             text("obstacle")
         } else {
             "The question's record wasn't found.".into()
@@ -942,8 +1152,13 @@ fn summary(
         return Ok(None);
     };
     let notice = Notice::Summary(outcome);
-    let Some(effect) = effects.iter().rev().find(|effect| {
+    let posted = effects.iter().rev().find(|effect| {
         matches!(effect.delivery.output, Output::Notice { notice: posted, .. } if posted == notice)
+    });
+    let Some((effect, facts)) = posted.and_then(|effect| {
+        notice_facts(request, effect, notice)
+            .ok()
+            .map(|facts| (effect, facts))
     }) else {
         return Ok(Some(ClosingSummary {
             ending,
@@ -953,7 +1168,6 @@ fn summary(
             note: None,
         }));
     };
-    let facts = notice_facts(request, effect, notice)?;
     Ok(Some(ClosingSummary {
         ending,
         outcome: plain(facts["outcome"].as_str().unwrap_or_default()),
@@ -964,8 +1178,8 @@ fn summary(
             .filter_map(Value::as_str)
             .map(plain)
             .collect(),
-        removed_changes: facts["removed_changes"].as_str().map(str::to_owned),
-        note: effect.delivery.note.clone(),
+        removed_changes: facts["removed_changes"].as_str().map(plain_text),
+        note: effect.delivery.note.as_deref().map(plain_text),
     }))
 }
 
@@ -1022,10 +1236,7 @@ fn request_links(
 fn plain(value: &str) -> String {
     value
         .chars()
-        .filter(|c| {
-            (!c.is_control() || c.is_whitespace())
-                && !matches!(*c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200b}'..='\u{200f}' | '\u{feff}')
-        })
+        .filter(|c| (!c.is_control() || c.is_whitespace()) && !hidden(*c))
         .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -1035,8 +1246,23 @@ fn plain(value: &str) -> String {
 /// Stored multi-line text with its line breaks kept: no control,
 /// direction-override or zero-width characters, no trailing spaces.
 fn plain_text(value: &str) -> String {
-    let _ = value;
-    todo!("plain text")
+    let text: String = value
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .chars()
+        .filter(|c| (matches!(c, '\n' | '\t') || !c.is_control()) && !hidden(*c))
+        .collect();
+    text.lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_matches('\n')
+        .to_owned()
+}
+
+/// Direction overrides and zero-width characters, which can disguise text.
+fn hidden(c: char) -> bool {
+    matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200b}'..='\u{200f}' | '\u{feff}')
 }
 
 #[cfg(test)]

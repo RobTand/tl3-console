@@ -29,12 +29,20 @@ export function useCaseFile(
     staleTime: Infinity,
     retry: (failures, error) => !(error instanceof NotFound) && failures < 2,
   });
-  // The board replaces a card object only when the stream changed it.
-  const shown = useRef(card);
+  // A closed drawer gets no stream updates, so its case file is dropped and
+  // reopening reads a fresh one.
   useEffect(() => {
-    if (shown.current === card) return;
-    shown.current = card;
-    if (id !== null) void client.invalidateQueries({ queryKey: key(id) });
+    if (id === null) return;
+    return () => client.removeQueries({ queryKey: key(id), exact: true });
+  }, [client, id]);
+  // The board replaces a card object only when the stream changed it. A
+  // newly opened request is already being read.
+  const shown = useRef({ id, card });
+  useEffect(() => {
+    const before = shown.current;
+    shown.current = { id, card };
+    if (id === null || before.id !== id || before.card === card) return;
+    void client.invalidateQueries({ queryKey: key(id) });
   }, [card, client, id]);
   const error =
     query.error instanceof NotFound

@@ -2,7 +2,7 @@
 //! a free session instead of opening one each, so a burst of drawer reads
 //! can't exhaust Postgres connections.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use tokio::sync::Semaphore;
 
 pub(crate) struct Sessions<T> {
@@ -12,8 +12,10 @@ pub(crate) struct Sessions<T> {
 
 impl<T: Send + 'static> Sessions<T> {
     pub(crate) fn new(limit: usize) -> Arc<Self> {
-        let _ = limit;
-        todo!("bounded sessions")
+        Arc::new(Self {
+            idle: Mutex::new(Vec::new()),
+            permits: Semaphore::new(limit),
+        })
     }
 
     /// Run blocking `work` on an idle session, opening one if none is idle.
@@ -27,8 +29,39 @@ impl<T: Send + 'static> Sessions<T> {
         R: Send + 'static,
         E: Send + 'static,
     {
-        let _ = (open, work, &self.idle, &self.permits);
-        todo!("bounded sessions")
+        let permit = self
+            .permits
+            .acquire()
+            .await
+            .expect("the session semaphore is never closed");
+        let sessions = self.clone();
+        let done = tokio::task::spawn_blocking(move || {
+            let idle = sessions
+                .idle
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .pop();
+            let mut session = match idle {
+                Some(session) => session,
+                None => open()?,
+            };
+            let result = work(&mut session);
+            if result.is_ok() {
+                sessions
+                    .idle
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(session);
+            }
+            result
+        })
+        .await;
+        drop(permit);
+        match done {
+            Ok(result) => result,
+            Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+            Err(error) => panic!("a session task was cancelled: {error}"),
+        }
     }
 }
 
