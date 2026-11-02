@@ -573,7 +573,7 @@ fn refuses_hosts_the_console_does_not_serve(settings: &tl3_config::Store, assets
         "/missing-asset.js",
     ];
     let own_host = address.to_string();
-    for evil in [
+    for (index, evil) in [
         "evil.example".to_string(),
         format!("evil.example:{port}"),
         // The right port on the wrong name, and the right name on a wrong port.
@@ -582,7 +582,10 @@ fn refuses_hosts_the_console_does_not_serve(settings: &tl3_config::Store, assets
         // Without the port, the browser's default, it is not the bound address.
         "127.0.0.1".to_string(),
         "console.example.test.evil.example".to_string(),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         for path in routes {
             for headers in [
                 String::new(),
@@ -602,6 +605,21 @@ fn refuses_hosts_the_console_does_not_serve(settings: &tl3_config::Store, assets
             "Content-Length: 0\r\n",
         );
         assert_eq!(status, 421, "POST as {evil}");
+        // So is a command, with the console's header and an Origin to match
+        // the rebound name; nothing reaches the store.
+        let id = format!("00000421-0000-4000-8000-{index:012x}");
+        let (status, _) = request_with_body(
+            address,
+            "POST",
+            "/api/requests/0/commands",
+            &evil,
+            &format!(
+                "Content-Type: application/json\r\nX-TL3-Console: 1\r\nOrigin: http://{evil}\r\nSec-Fetch-Site: same-origin\r\n"
+            ),
+            &format!(r#"{{"id":"{id}","action":{{"kind":"pause"}}}}"#),
+        );
+        assert_eq!(status, 421, "POST a command as {evil}");
+        assert!(!filed(settings, &id), "a command for {evil} was filed");
     }
     // HTTP/1.0 without a Host header names no host at all.
     for path in routes {
