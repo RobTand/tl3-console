@@ -52,6 +52,14 @@ fn main() {
     println!("test refuses_hosts_the_console_does_not_serve ... ok");
     cards_follow_the_quota_fallback(&settings, assets.path());
     println!("test cards_follow_the_quota_fallback ... ok");
+    let (filer, mut filer_stream, node) =
+        a_command_round_trips_to_tl3d_and_back(&settings, assets.path(), &mut controller);
+    println!("test a_command_round_trips_to_tl3d_and_back ... ok");
+    commands_stay_small(&settings, &filer, &mut filer_stream, node);
+    println!("test commands_stay_small ... ok");
+    store_refusals_say_why(&settings, &filer, node);
+    println!("test store_refusals_say_why ... ok");
+    drop(filer);
     drop(controller);
     builds_once_the_store_is_migrated(&mut database, assets.path());
     println!("test builds_once_the_store_is_migrated ... ok");
@@ -68,7 +76,7 @@ fn main() {
     streams_again_after_postgres_restarts(address, &mut database, &settings, records.path());
     println!("test streams_again_after_postgres_restarts ... ok");
     database.stop();
-    println!("14 console scenarios passed; no skips");
+    println!("17 console scenarios passed; no skips");
 }
 
 fn bootstrap() -> Bootstrap {
@@ -343,6 +351,7 @@ struct Event {
 struct EventStream {
     body: ChunkedBody,
     last_database: Option<Value>,
+    last_commands: Option<Value>,
 }
 
 impl EventStream {
@@ -370,6 +379,7 @@ impl EventStream {
         Self {
             body: ChunkedBody::new(reader),
             last_database: None,
+            last_commands: None,
         }
     }
 
@@ -403,6 +413,10 @@ impl EventStream {
             let event = self.event();
             if event.name == "database" {
                 self.last_database = Some(event.data);
+                continue;
+            }
+            if event.name == "commands" {
+                self.last_commands = Some(event.data);
                 continue;
             }
             return event;
@@ -830,4 +844,286 @@ fn cards_follow_the_quota_fallback(settings: &tl3_config::Store, assets: &Path) 
             break;
         }
     }
+}
+
+fn post(address: SocketAddr, path: &str, headers: &str, body: &str) -> (u16, Vec<u8>) {
+    request_with_body(
+        address,
+        "POST",
+        path,
+        &address.to_string(),
+        &format!("Content-Type: application/json\r\n{headers}"),
+        body,
+    )
+}
+
+/// One raw HTTP/1.1 request, naming whatever Host the caller likes.
+fn request_with_body(
+    address: SocketAddr,
+    method: &str,
+    path: &str,
+    host: &str,
+    headers: &str,
+    body: &str,
+) -> (u16, Vec<u8>) {
+    let mut socket = TcpStream::connect(address).unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    // An oversized body may be refused before it is all read.
+    let _ = write!(
+        socket,
+        "{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nContent-Length: {}\r\n{headers}\r\n{body}",
+        body.len()
+    );
+    let mut reader = BufReader::new(socket);
+    let (status, headers) = response_head(&mut reader);
+    let body = if headers.contains("transfer-encoding: chunked") {
+        ChunkedBody::new(reader).rest()
+    } else {
+        let mut body = Vec::new();
+        let _ = reader.read_to_end(&mut body);
+        body
+    };
+    (status, body)
+}
+
+/// The console files a command through its read-only login; tl3d applies it
+/// on its next drain, and the stream shows it pending, then applied, with the
+/// card's new badge.
+fn a_command_round_trips_to_tl3d_and_back(
+    settings: &tl3_config::Store,
+    assets: &Path,
+    controller: &mut Controller,
+) -> (tl3_console::Running, EventStream, u64) {
+    tl3_store::grant_reader(
+        settings,
+        "tl3_console_filer",
+        settings.password_file.as_deref().unwrap(),
+    )
+    .unwrap();
+    let console = tl3_console::start(
+        TcpListener::bind("127.0.0.1:0").unwrap(),
+        tl3_console::Options {
+            store: tl3_config::Store {
+                user: "tl3_console_filer".into(),
+                ..settings.clone()
+            },
+            assets: assets.into(),
+            models: None,
+            links: Default::default(),
+            public_hosts: vec![],
+        },
+    )
+    .unwrap();
+    let address = console.address();
+    let mut stream = EventStream::open(address, None);
+    let snapshot = stream.board_event();
+    assert_eq!(snapshot.name, "snapshot");
+    let card = snapshot.data["cards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|card| card["issue"] == 42)
+        .unwrap()
+        .clone();
+    assert!(
+        !card["badges"]
+            .as_array()
+            .unwrap()
+            .contains(&"Paused".into())
+    );
+    let node = card["id"].as_u64().unwrap();
+    let path = format!("/api/requests/{node}/commands");
+    let id = "5c6d7e8f-0000-4000-8000-000000000331";
+    let body = format!(r#"{{"id":"{id}","action":{{"kind":"pause"}}}}"#);
+    let own =
+        format!("X-TL3-Console: 1\r\nOrigin: http://{address}\r\nSec-Fetch-Site: same-origin\r\n");
+    let own = own.as_str();
+    for (headers, status) in [
+        ("", 403),
+        ("X-TL3-Console: 1\r\nOrigin: http://evil.example\r\n", 403),
+        ("X-TL3-Console: 1\r\nSec-Fetch-Site: cross-site\r\n", 403),
+    ] {
+        assert_eq!(post(address, &path, headers, &body).0, status, "{headers}");
+    }
+    assert_eq!(
+        post(
+            address,
+            &path,
+            own,
+            r#"{"id":"x","action":{"kind":"pause"}}"#
+        )
+        .0,
+        422
+    );
+    assert_eq!(
+        post(
+            address,
+            &path,
+            own,
+            &format!(r#"{{"id":"{id}","action":{{"kind":"launch"}}}}"#)
+        )
+        .0,
+        422
+    );
+    let (status, reply) = post(address, &path, own, &body);
+    assert_eq!(status, 202, "{}", String::from_utf8_lossy(&reply));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&reply).unwrap(),
+        serde_json::json!({"id": id, "filed": true})
+    );
+    let (status, reply) = post(address, &path, own, &body);
+    assert_eq!(status, 202);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&reply).unwrap()["filed"],
+        false,
+        "resending the same id files nothing more"
+    );
+    let status_of = |stream: &mut EventStream| -> Option<String> {
+        stream.last_commands.as_ref().and_then(|event| {
+            event["commands"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|command| command["id"] == id)
+                .map(|command| command["status"].as_str().unwrap().to_string())
+        })
+    };
+    while status_of(&mut stream).as_deref() != Some("pending") {
+        let event = stream.event();
+        if event.name == "commands" {
+            stream.last_commands = Some(event.data);
+        }
+    }
+    tl3_controller::ingress::drain(controller).unwrap();
+    let mut paused = false;
+    while !paused || status_of(&mut stream).as_deref() != Some("applied") {
+        let event = stream.event();
+        match event.name.as_str() {
+            "commands" => stream.last_commands = Some(event.data),
+            "patch" => {
+                paused |= event.data["patch"]["upserts"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|card| {
+                        card["id"] == node
+                            && card["badges"]
+                                .as_array()
+                                .unwrap()
+                                .contains(&"Paused".into())
+                    });
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        stream.last_commands.as_ref().unwrap()["commands"][0]["action"],
+        serde_json::json!({"kind": "pause"})
+    );
+    (console, stream, node)
+}
+
+fn filed(settings: &tl3_config::Store, id: &str) -> bool {
+    raw(settings)
+        .query_opt("SELECT 1 FROM tl3_console_commands WHERE id = $1", &[&id])
+        .unwrap()
+        .is_some()
+}
+
+/// Command bodies are small: a few KiB around TL3's 20,000-character cap on
+/// Rob's words. Oversized ones never reach TL3, and the stream doesn't repeat
+/// long texts in every commands event.
+fn commands_stay_small(
+    settings: &tl3_config::Store,
+    console: &tl3_console::Running,
+    stream: &mut EventStream,
+    node: u64,
+) {
+    let address = console.address();
+    let path = format!("/api/requests/{node}/commands");
+    let own =
+        format!("X-TL3-Console: 1\r\nOrigin: http://{address}\r\nSec-Fetch-Site: same-origin\r\n");
+    let comment = |id: &str, chars: usize| {
+        format!(
+            r#"{{"id":"{id}","action":{{"kind":"comment","text":"{}"}}}}"#,
+            "a".repeat(chars)
+        )
+    };
+    let huge = "5c6d7e8f-0000-4000-8000-000000000333";
+    assert_eq!(post(address, &path, &own, &comment(huge, 200_000)).0, 413);
+    assert!(!filed(settings, huge));
+    let over = "5c6d7e8f-0000-4000-8000-000000000334";
+    assert_eq!(post(address, &path, &own, &comment(over, 20_001)).0, 422);
+    let guidance = "5c6d7e8f-0000-4000-8000-000000000336";
+    let long_guidance = format!(
+        r#"{{"id":"{guidance}","action":{{"kind":"answer","question":1,"choice":{{"answer":"try_again","guidance":"{}"}}}}}}"#,
+        "g".repeat(20_001)
+    );
+    assert_eq!(post(address, &path, &own, &long_guidance).0, 422);
+    assert!(!filed(settings, over) && !filed(settings, guidance));
+    let full = "5c6d7e8f-0000-4000-8000-000000000335";
+    assert_eq!(post(address, &path, &own, &comment(full, 20_000)).0, 202);
+    assert!(filed(settings, full));
+    loop {
+        let event = stream.event();
+        if event.name != "commands" {
+            continue;
+        }
+        let Some(shown) = event.data["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|command| command["id"] == full)
+            .cloned()
+        else {
+            continue;
+        };
+        let text = shown["action"]["text"].as_str().unwrap();
+        assert_eq!(text.chars().count(), 201, "{text}");
+        assert!(text.ends_with('…'));
+        break;
+    }
+}
+
+/// The store's own caps on a command come back as HTTP answers that say
+/// which: a command over 64 KiB once stored, and a backlog tl3d isn't draining.
+fn store_refusals_say_why(settings: &tl3_config::Store, console: &tl3_console::Running, node: u64) {
+    let address = console.address();
+    let path = format!("/api/requests/{node}/commands");
+    let own =
+        format!("X-TL3-Console: 1\r\nOrigin: http://{address}\r\nSec-Fetch-Site: same-origin\r\n");
+    // 20,000 characters pass the console's cap, but four bytes each is over the store's.
+    let wide = "5c6d7e8f-0000-4000-8000-000000000337";
+    let body = format!(
+        r#"{{"id":"{wide}","action":{{"kind":"comment","text":"{}"}}}}"#,
+        "\u{1d11e}".repeat(20_000)
+    );
+    let (status, reply) = post(address, &path, &own, &body);
+    assert_eq!(status, 413, "{}", String::from_utf8_lossy(&reply));
+    assert_eq!(
+        String::from_utf8(reply).unwrap(),
+        "This command is over 64 KiB once stored; shorten your words.\n"
+    );
+    assert!(!filed(settings, wide));
+    let mut owner = raw(settings);
+    owner
+        .batch_execute(
+            "INSERT INTO tl3_console_commands (id, node_id, action)
+             SELECT 'backlog-' || n, 0, '{\"kind\":\"pause\"}' FROM generate_series(1, 1000) n",
+        )
+        .unwrap();
+    let late = "5c6d7e8f-0000-4000-8000-000000000338";
+    let body = format!(r#"{{"id":"{late}","action":{{"kind":"pause"}}}}"#);
+    let (status, reply) = post(address, &path, &own, &body);
+    assert_eq!(status, 429, "{}", String::from_utf8_lossy(&reply));
+    assert_eq!(
+        String::from_utf8(reply).unwrap(),
+        "1,000 commands are waiting for TL3 to apply them; try again once it catches up.\n"
+    );
+    assert!(!filed(settings, late));
+    owner
+        .batch_execute("DELETE FROM tl3_console_commands WHERE id LIKE 'backlog-%'")
+        .unwrap();
 }

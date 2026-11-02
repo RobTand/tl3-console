@@ -7,6 +7,7 @@ import { Status } from "./components/Status";
 import { CaseDrawer } from "./features/case-file/CaseDrawer";
 import { useOpenRequest } from "./features/case-file/live";
 import { filterCards } from "./filter";
+import { CardCommands, CommandsProvider, DeferAll } from "./features/commands";
 import { useTheme, type Theme } from "./theme";
 import { useNow } from "./time";
 
@@ -76,7 +77,7 @@ function ThemeSwitch() {
 }
 
 export function App() {
-  const { board, connection } = useLiveBoard();
+  const { board, connection, commands } = useLiveBoard();
   const now = useNow();
   const request = useOpenRequest();
   const [repo, setRepo] = useState<string | null>(null);
@@ -84,6 +85,7 @@ export function App() {
   const repos = useMemo(() => [...new Set(board?.cards.map((card) => card.repo))].sort(), [board]);
   const cards = useMemo(() => (board ? filterCards(board.cards, { repo, query }) : []), [board, repo, query]);
   return (
+    <CommandsProvider records={commands}>
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <h1 className="flex items-baseline gap-2 text-base font-semibold">
@@ -133,6 +135,17 @@ export function App() {
                   cards={cards.filter((card) => card.column === column.column)}
                   onOpen={request.open}
                   {...(older > 0 ? { note: `${older} older ${older === 1 ? "ending" : "endings"} not shown` } : {})}
+                  cardExtras={(card) => <CardCommands card={card} compact={column.column !== "NeedsRob"} />}
+                  {...(column.column === "NeedsRob"
+                    ? {
+                        action: (
+                          <DeferAll
+                            cards={cards.filter((card) => card.question !== null)}
+                            filtered={repo !== null || query.trim() !== ""}
+                          />
+                        ),
+                      }
+                    : {})}
                 />
               );
             })}
@@ -148,7 +161,9 @@ export function App() {
         card={board?.cards.find((card) => card.id === request.id)}
         now={now}
         onClose={request.close}
+        actions={(card) => <CardCommands card={card} />}
       />
     </div>
+    </CommandsProvider>
   );
 }

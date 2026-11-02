@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 import type { Card, Column } from "../api/types.gen";
 import { BoardCard } from "./BoardCard";
 
@@ -16,6 +16,10 @@ export function BoardColumn(props: {
   now: number;
   note?: string;
   onOpen?: (id: number) => void;
+  /** Shown in the column's heading. */
+  action?: ReactNode;
+  /** Shown at the foot of each card. */
+  cardExtras?: (card: Card) => ReactNode;
 }) {
   const heading = useId();
   return (
@@ -30,6 +34,7 @@ export function BoardColumn(props: {
         <span className="rounded bg-surface px-1.5 font-mono text-2xs font-medium text-faint">
           {props.cards.length}
         </span>
+        {props.action && <span className="ml-auto">{props.action}</span>}
       </h2>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
         {props.cards.length === 0 ? (
@@ -38,7 +43,9 @@ export function BoardColumn(props: {
           </p>
         ) : (
           ordered(props.column, props.cards).map((card) => (
-            <BoardCard key={card.id} card={card} now={props.now} {...(props.onOpen ? { onOpen: props.onOpen } : {})} />
+            <BoardCard key={card.id} card={card} now={props.now} {...(props.onOpen ? { onOpen: props.onOpen } : {})}>
+              {props.cardExtras?.(card)}
+            </BoardCard>
           ))
         )}
         {props.note && <p className="px-1 pt-1 text-2xs text-faint">{props.note}</p>}

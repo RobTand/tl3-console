@@ -6,6 +6,7 @@
 
 pub mod api;
 pub mod case_file;
+mod commands;
 pub mod config;
 mod feed;
 mod hosts;
@@ -27,7 +28,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use supervise::Supervisor;
-use tl3_controller::board::{Board, Rows};
+use tl3_controller::{
+    board::{Board, Rows},
+    console::CommandRecord,
+};
 use tokio::sync::watch;
 
 #[derive(Debug, thiserror::Error)]
@@ -87,6 +91,8 @@ pub(crate) struct Published {
     /// Counts board builds, to tell stream events apart.
     pub build: u64,
     pub board: Option<Arc<Board>>,
+    /// The newest console commands and how each settled.
+    pub commands: Option<Arc<Vec<CommandRecord>>>,
     /// The change feed is open and the last build read the store.
     pub connected: bool,
 }
@@ -121,6 +127,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         links: Arc::new(links),
         sessions: sessions::Sessions::new(case_file::SESSIONS),
     };
+    let filer = commands::router(store.clone());
     {
         let (store, rebuilds, connected) = (store.clone(), rebuilds.clone(), connected.clone());
         supervisor.spawn("feed", move || feed::run(store, rebuilds, connected))?;
@@ -131,6 +138,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
             models,
             reader: None,
             rows: None,
+            commands: None,
         };
         let mut retry = feed::Backoff::new();
         while let Some(change) = rebuilds.next() {
@@ -143,7 +151,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
             publish.send_if_modified(|current| {
                 let mut changed = current.connected != live;
                 current.connected = live;
-                if let Ok(board) = &built
+                if let Ok((board, _)) = &built
                     && current
                         .board
                         .as_deref()
@@ -151,6 +159,12 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
                 {
                     current.build += 1;
                     current.board = Some(Arc::new(board.clone()));
+                    changed = true;
+                }
+                if let Ok((_, commands)) = &built
+                    && current.commands.as_deref() != Some(commands)
+                {
+                    current.commands = Some(Arc::new(commands.clone()));
                     changed = true;
                 }
                 changed
@@ -168,7 +182,12 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         .thread_name("tl3-console-http")
         .enable_all()
         .build()?;
-    let app = server::router(published, &assets, case_file::routes(case_files), hosts);
+    let app = server::router(
+        published,
+        &assets,
+        case_file::routes(case_files).merge(filer),
+        hosts,
+    );
     supervisor.spawn("http", move || {
         let served = runtime.block_on(async move {
             let listener = tokio::net::TcpListener::from_std(listener)?;
@@ -184,17 +203,23 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
     })
 }
 
+/// Enough for every action a browser is waiting on, and a bulk defer.
+const COMMANDS_SHOWN: i64 = 200;
+
 /// Keeps the last read rows so a progress tick rereads progress alone.
 struct Builder {
     store: tl3_config::Store,
     models: Option<tl3_config::Models>,
     reader: Option<Session>,
     rows: Option<Rows>,
+    /// The newest commands as last read; a progress tick keeps them.
+    commands: Option<Vec<CommandRecord>>,
 }
 
 impl Builder {
-    /// Read the board in one snapshot. A broken session is replaced once.
-    fn build(&mut self, change: Change) -> tl3_controller::Result<Board> {
+    /// Read the board and the newest console commands in one snapshot. A
+    /// broken session is replaced once.
+    fn build(&mut self, change: Change) -> tl3_controller::Result<(Board, Vec<CommandRecord>)> {
         let mut retried = false;
         loop {
             match self.read(change) {
@@ -207,23 +232,29 @@ impl Builder {
         }
     }
 
-    fn read(&mut self, change: Change) -> tl3_controller::Result<Board> {
+    fn read(&mut self, change: Change) -> tl3_controller::Result<(Board, Vec<CommandRecord>)> {
         if self.reader.is_none() {
             self.reader = Some(Session::open(&self.store, "board")?);
         }
         let session = self.reader.as_mut().expect("an open reader");
         let mut tx = session.transaction()?;
         let rows = match (change, self.rows.take()) {
-            (Change::Progress, Some(mut rows)) => {
+            (Change::Progress | Change::Commands, Some(mut rows)) => {
                 rows.refresh_progress(&mut tx)?;
                 rows
             }
             _ => Rows::read(&mut tx)?,
         };
+        // tl3d settles commands in its own commits, so World rereads them too.
+        let commands = match (change, self.commands.take()) {
+            (Change::Progress, Some(commands)) => commands,
+            _ => commands::brief(tl3_controller::console::recent(&mut tx, COMMANDS_SHOWN)?),
+        };
+        self.commands = Some(commands.clone());
         tx.commit().map_err(tl3_store::Error::from)?;
         let board = rows.project(now_ms(), self.models.as_ref());
         self.rows = Some(rows);
-        Ok(board)
+        Ok((board, commands))
     }
 }
 

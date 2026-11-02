@@ -1,4 +1,4 @@
-import type { Board, BoardPatch, PatchEvent } from "./types.gen";
+import type { Board, BoardPatch, CommandsEvent, PatchEvent } from "./types.gen";
 
 export type StreamState = "connecting" | "open" | "reconnecting";
 
@@ -7,6 +7,8 @@ export interface StreamHandlers {
   patch(patch: BoardPatch): void;
   database(connected: boolean): void;
   state(state: StreamState): void;
+  /** The newest console commands and how each settled. */
+  commands?(event: CommandsEvent): void;
 }
 
 /** The parts of EventSource the stream uses. */
@@ -110,6 +112,9 @@ export class BoardStream {
       }
       this.shown = event.lastEventId;
       this.handlers.patch(patch);
+    });
+    source.addEventListener("commands", (event) => {
+      this.handlers.commands?.(JSON.parse(event.data) as CommandsEvent);
     });
     source.addEventListener("database", (event) => {
       this.handlers.database((JSON.parse(event.data) as { connected: boolean }).connected);

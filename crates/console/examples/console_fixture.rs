@@ -3,11 +3,15 @@
 //!
 //! Prints `{"url": ...}` once serving. Each `advance` line on stdin drives the
 //! controller until request #42 changes column and prints `{"column": ...}`.
-//! Closing stdin stops Postgres and exits.
+//! Each `apply` line applies the console commands filed so far, as tl3d does
+//! when the console wakes it, and prints `{"applied": true}`. Closing stdin
+//! stops Postgres and exits.
 //!
 //! Scripted workers give two requests a story for the case file: the kernel
 //! cache request's maker is blocked twice, Rob clears the incident, and its
 //! first review asks for changes; the FP8 request's planner can't meet it.
+//! Request #43's first run fails for good, so it waits in Needs Rob with a
+//! question TL3 can decide alone.
 
 #[path = "../tests/support/mod.rs"]
 mod support;
@@ -54,6 +58,8 @@ const SEED: [(&str, Column); 8] = [
 /// The seeded requests the scripted workers tell a story for, by node.
 const NEEDS_ROB: u64 = 2;
 const FIX_ROUND: u64 = 5;
+/// The issue whose effect-failed question Rob can leave to TL3.
+const DEFERRABLE: u64 = 43;
 
 /// The simulated workers, with scripted replies for two seeded requests.
 struct Workers {
@@ -63,6 +69,9 @@ struct Workers {
 
 impl Executor for Workers {
     fn execute(&mut self, delivery: &Delivery) -> tl3_controller::Result<Completion> {
+        if delivery.issue == DEFERRABLE {
+            return Ok(Completion::permanent("fixture"));
+        }
         let Output::Effect {
             kind: EffectKind::StartRun(role),
             node,
@@ -189,6 +198,16 @@ fn main() {
     controller
         .intake(issue(
             "tl3-sandbox",
+            DEFERRABLE,
+            "Mirror the wheel cache to the Sparks",
+        ))
+        .unwrap();
+    while column(&settings, "tl3-sandbox", DEFERRABLE) != Column::NeedsRob
+        && controller.drive_once().unwrap()
+    {}
+    controller
+        .intake(issue(
+            "tl3-sandbox",
             42,
             "Add a live board to the operator console",
         ))
@@ -222,7 +241,13 @@ fn main() {
         json!({"url": format!("http://{}", console.address())})
     );
     for line in std::io::stdin().lock().lines() {
-        if line.unwrap().trim() != "advance" {
+        let line = line.unwrap();
+        if line.trim() == "apply" {
+            tl3_controller::ingress::drain(&mut controller).unwrap();
+            println!("{}", json!({ "applied": true }));
+            continue;
+        }
+        if line.trim() != "advance" {
             continue;
         }
         let before = column(&settings, "tl3-sandbox", 42);

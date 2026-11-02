@@ -14,6 +14,8 @@ pub(crate) struct Rebuilds {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Change {
     Progress,
+    /// Console commands filed, and any progress with them.
+    Commands,
     World,
 }
 
@@ -97,6 +99,18 @@ mod tests {
         assert_eq!(rebuilds.next(), Some(Change::World));
         rebuilds.stop();
         assert_eq!(rebuilds.next(), None);
+    }
+
+    #[test]
+    fn filed_commands_cover_progress_and_a_world_change_covers_both() {
+        let rebuilds = Rebuilds::default();
+        rebuilds.request(Change::Progress);
+        rebuilds.request(Change::Commands);
+        rebuilds.request(Change::Progress);
+        assert_eq!(rebuilds.next(), Some(Change::Commands));
+        rebuilds.request(Change::Commands);
+        rebuilds.request(Change::World);
+        assert_eq!(rebuilds.next(), Some(Change::World));
     }
 
     #[test]

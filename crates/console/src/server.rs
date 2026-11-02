@@ -2,7 +2,7 @@
 
 use crate::{
     Published,
-    api::{DatabaseStatus, PatchEvent},
+    api::{CommandsEvent, DatabaseStatus, PatchEvent},
 };
 use axum::{
     Json, Router,
@@ -16,7 +16,7 @@ use axum::{
 };
 use futures_util::stream::{self, Stream};
 use std::{collections::VecDeque, convert::Infallible, path::Path, sync::Arc, time::Duration};
-use tl3_controller::board::Board;
+use tl3_controller::{board::Board, console::CommandRecord};
 use tokio::sync::watch;
 use tower_http::{
     services::{ServeDir, ServeFile},
@@ -99,6 +99,7 @@ async fn events(
         published,
         shown: None,
         shown_id: String::new(),
+        shown_commands: None,
         connected: None,
         queue: VecDeque::new(),
         retry_sent: false,
@@ -114,6 +115,7 @@ struct Client {
     shown: Option<Arc<Board>>,
     /// The event id of `shown`, which the next patch names as its base.
     shown_id: String,
+    shown_commands: Option<Arc<Vec<CommandRecord>>>,
     connected: Option<bool>,
     queue: VecDeque<Event>,
     retry_sent: bool,
@@ -154,6 +156,20 @@ impl Client {
                 });
                 self.shown = Some(board);
                 self.shown_id = id;
+            }
+            if let Some(commands) = current.commands
+                && !self
+                    .shown_commands
+                    .as_ref()
+                    .is_some_and(|shown| Arc::ptr_eq(shown, &commands))
+            {
+                self.queue.push_back(json(
+                    Event::default().event("commands"),
+                    &CommandsEvent {
+                        commands: commands.as_ref().clone(),
+                    },
+                ));
+                self.shown_commands = Some(commands);
             }
             if self.queue.is_empty() && self.published.changed().await.is_err() {
                 return None;

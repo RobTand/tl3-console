@@ -6,7 +6,8 @@ import { createInterface } from "node:readline";
  * The console fixture (crates/console/examples/console_fixture.rs): an
  * embedded Postgres, a store seeded by the simulated controller, and the
  * console serving this app's dist/. Each `advance` drives the controller
- * until request #42 changes column and returns the new column.
+ * until request #42 changes column and returns the new column; `apply`
+ * applies the console commands filed so far. Request #43 waits in Needs Rob.
  */
 export async function startFixture() {
   const binary = process.env.TL3_CONSOLE_FIXTURE;
@@ -31,6 +32,11 @@ export async function startFixture() {
     advance: async () => {
       child.stdin.write("advance\n");
       return (await next()).column!;
+    },
+    /** Apply the console commands filed so far, as tl3d does when the console wakes it. */
+    apply: async () => {
+      child.stdin.write("apply\n");
+      await next();
     },
     stop: () =>
       new Promise<void>((resolve) => {
