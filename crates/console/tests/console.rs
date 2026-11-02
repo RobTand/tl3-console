@@ -8,8 +8,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use support::Database;
+use tl3_console::hidden::HiddenRepos;
 use tl3_controller::{Bootstrap, Controller, LabelledIssue, Repository, adapters, board};
-use tl3_store::{Reader, Store, grant_reader};
+use tl3_store::{Reader, Store};
 
 const ROLE: &str = "tl3_console_reader";
 
@@ -33,6 +34,8 @@ fn main() {
             assets: assets.path().into(),
             models: None,
             links: Default::default(),
+            public_hosts: vec![],
+            hidden: Default::default(),
         },
     )
     .unwrap();
@@ -47,8 +50,20 @@ fn main() {
     println!("test serves_board_and_web_app ... ok");
     console_reads_through_a_role_that_cannot_write(&settings);
     println!("test console_reads_through_a_role_that_cannot_write ... ok");
+    let hidden_database = hides_repos_from_every_view(assets.path());
+    println!("test hides_repos_from_every_view ... ok");
+    refuses_hosts_the_console_does_not_serve(&settings, assets.path());
+    println!("test refuses_hosts_the_console_does_not_serve ... ok");
     cards_follow_the_quota_fallback(&settings, assets.path());
     println!("test cards_follow_the_quota_fallback ... ok");
+    let (filer, mut filer_stream, node) =
+        a_command_round_trips_to_tl3d_and_back(&settings, assets.path(), &mut controller);
+    println!("test a_command_round_trips_to_tl3d_and_back ... ok");
+    commands_stay_small(&settings, &filer, &mut filer_stream, node);
+    println!("test commands_stay_small ... ok");
+    store_refusals_say_why(&settings, &filer, node);
+    println!("test store_refusals_say_why ... ok");
+    drop(filer);
     prompts_edit_and_revert_through_the_api(&mut database, assets.path());
     println!("test prompts_edit_and_revert_through_the_api ... ok");
     drop(controller);
@@ -67,7 +82,8 @@ fn main() {
     streams_again_after_postgres_restarts(address, &mut database, &settings, records.path());
     println!("test streams_again_after_postgres_restarts ... ok");
     database.stop();
-    println!("14 console scenarios passed; no skips");
+    hidden_database.stop();
+    println!("19 console scenarios passed; no skips");
 }
 
 fn bootstrap() -> Bootstrap {
@@ -342,6 +358,7 @@ struct Event {
 struct EventStream {
     body: ChunkedBody,
     last_database: Option<Value>,
+    last_commands: Option<Value>,
 }
 
 impl EventStream {
@@ -358,7 +375,7 @@ impl EventStream {
             .unwrap_or_default();
         write!(
             socket,
-            "GET /api/stream HTTP/1.1\r\nHost: console\r\nAccept: text/event-stream\r\n{resume}\r\n"
+            "GET /api/stream HTTP/1.1\r\nHost: {address}\r\nAccept: text/event-stream\r\n{resume}\r\n"
         )
         .unwrap();
         let mut reader = BufReader::new(socket);
@@ -369,6 +386,7 @@ impl EventStream {
         Self {
             body: ChunkedBody::new(reader),
             last_database: None,
+            last_commands: None,
         }
     }
 
@@ -402,6 +420,10 @@ impl EventStream {
             let event = self.event();
             if event.name == "database" {
                 self.last_database = Some(event.data);
+                continue;
+            }
+            if event.name == "commands" {
+                self.last_commands = Some(event.data);
                 continue;
             }
             return event;
@@ -478,7 +500,7 @@ fn get(address: SocketAddr, path: &str) -> (u16, String, Vec<u8>) {
         .unwrap();
     write!(
         socket,
-        "GET {path} HTTP/1.1\r\nHost: console\r\nConnection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
     )
     .unwrap();
     let mut reader = BufReader::new(socket);
@@ -493,6 +515,151 @@ fn get(address: SocketAddr, path: &str) -> (u16, String, Vec<u8>) {
     (status, headers, body)
 }
 
+/// One raw HTTP/1.1 request naming whatever Host the caller likes, or none
+/// (HTTP/1.0). Returns the status and the whole body.
+fn request(
+    address: SocketAddr,
+    method: &str,
+    path: &str,
+    host: Option<&str>,
+    headers: &str,
+) -> (u16, String) {
+    let mut socket = TcpStream::connect(address).unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    match host {
+        Some(host) => write!(
+            socket,
+            "{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n{headers}\r\n"
+        ),
+        None => write!(socket, "{method} {path} HTTP/1.0\r\n{headers}\r\n"),
+    }
+    .unwrap();
+    let mut reader = BufReader::new(socket);
+    let (status, headers) = response_head(&mut reader);
+    let mut body = Vec::new();
+    if headers.contains("transfer-encoding: chunked") {
+        body = ChunkedBody::new(reader).rest();
+    } else {
+        reader.read_to_end(&mut body).unwrap();
+    }
+    (status, String::from_utf8_lossy(&body).into_owned())
+}
+
+/// DNS rebinding: a page on another site points its own name at the console,
+/// and the browser sends that name as Host, with an Origin that matches it.
+/// Every route is refused for any Host the console doesn't serve, and nothing
+/// is served.
+fn refuses_hosts_the_console_does_not_serve(settings: &tl3_config::Store, assets: &Path) {
+    let console = tl3_console::start(
+        TcpListener::bind("127.0.0.1:0").unwrap(),
+        tl3_console::Options {
+            store: settings.clone(),
+            assets: assets.into(),
+            models: None,
+            links: Default::default(),
+            public_hosts: vec!["Console.Example.Test".into()],
+            hidden: Default::default(),
+        },
+    )
+    .unwrap();
+    let address = console.address();
+    let port = address.port();
+    // The board is built before the served names are compared against it.
+    assert_eq!(
+        EventStream::open(address, None).board_event().name,
+        "snapshot"
+    );
+    let routes = [
+        "/api/board",
+        "/api/stream",
+        "/api/requests/42",
+        "/api/nothing-here",
+        "/",
+        "/index.html",
+        "/missing-asset.js",
+    ];
+    let own_host = address.to_string();
+    for (index, evil) in [
+        "evil.example".to_string(),
+        format!("evil.example:{port}"),
+        // The right port on the wrong name, and the right name on a wrong port.
+        format!("192.168.1.107:{port}"),
+        format!("127.0.0.1:{}", port.wrapping_add(1)),
+        // Without the port, the browser's default, it is not the bound address.
+        "127.0.0.1".to_string(),
+        "console.example.test.evil.example".to_string(),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for path in routes {
+            for headers in [
+                String::new(),
+                format!("Origin: http://{evil}\r\nSec-Fetch-Site: same-origin\r\n"),
+            ] {
+                let (status, body) = request(address, "GET", path, Some(&evil), &headers);
+                assert_eq!(status, 421, "GET {path} as {evil}: {body}");
+                assert_eq!(body, "This console doesn't answer to that host name.\n");
+            }
+        }
+        // A write is refused before its route, or the lack of one, is known.
+        let (status, _) = request(
+            address,
+            "POST",
+            "/api/board",
+            Some(&evil),
+            "Content-Length: 0\r\n",
+        );
+        assert_eq!(status, 421, "POST as {evil}");
+        // So is a command, with the console's header and an Origin to match
+        // the rebound name; nothing reaches the store.
+        let id = format!("00000421-0000-4000-8000-{index:012x}");
+        let (status, _) = request_with_body(
+            address,
+            "POST",
+            "/api/requests/0/commands",
+            &evil,
+            &format!(
+                "Content-Type: application/json\r\nX-TL3-Console: 1\r\nOrigin: http://{evil}\r\nSec-Fetch-Site: same-origin\r\n"
+            ),
+            &format!(r#"{{"id":"{id}","action":{{"kind":"pause"}}}}"#),
+        );
+        assert_eq!(status, 421, "POST a command as {evil}");
+        assert!(!filed(settings, &id), "a command for {evil} was filed");
+    }
+    // HTTP/1.0 without a Host header names no host at all.
+    for path in routes {
+        let (status, body) = request(address, "GET", path, None, "");
+        assert_eq!(status, 421, "GET {path} without Host: {body}");
+    }
+    // The bound address, `localhost` on loopback and a configured name (in
+    // any case) are served.
+    for host in [
+        own_host.as_str(),
+        &format!("localhost:{port}"),
+        "console.example.test",
+        "CONSOLE.example.test",
+    ] {
+        let (status, body) = request(address, "GET", "/api/board", Some(host), "");
+        assert_eq!(status, 200, "GET /api/board as {host}: {body}");
+        assert!(body.contains("\"revision\""), "{body}");
+        let (status, body) = request(address, "GET", "/", Some(host), "");
+        assert_eq!(status, 200, "GET / as {host}");
+        assert!(body.contains("TL3 console"), "{body}");
+    }
+    // Past the allowlist, a route that takes no writes still says so.
+    let (status, _) = request(
+        address,
+        "POST",
+        "/api/board",
+        Some(&own_host),
+        "Content-Length: 0\r\n",
+    );
+    assert_eq!(status, 405);
+}
+
 /// A console started before tl3d migrates the store builds the board once the
 /// schema matches, without waiting for a controller commit.
 fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
@@ -504,6 +671,8 @@ fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
             assets: assets.into(),
             models: None,
             links: Default::default(),
+            public_hosts: vec![],
+            hidden: Default::default(),
         },
     )
     .unwrap();
@@ -540,6 +709,8 @@ fn start_console(settings: &tl3_config::Store, assets: &Path) -> tl3_console::Ru
             assets: assets.into(),
             models: None,
             links: Default::default(),
+            public_hosts: vec![],
+            hidden: Default::default(),
         },
     )
     .unwrap()
@@ -612,14 +783,9 @@ fn refuses_an_older_schema(database: &mut Database, assets: &Path) {
         )
         .unwrap()
         .get(0);
-    // Pinned versions may skip one another's numbers, as 12 skips 11 until it merges.
-    let previous: i32 = raw(&settings)
-        .query_one("SELECT max(version) FROM tl3_schema_migrations", &[])
-        .unwrap()
-        .get(0);
     let error = tl3_console::check(&settings).unwrap_err().to_string();
     assert!(
-        error.contains(&format!("schema version {previous}")),
+        error.contains(&format!("schema version {}", pinned - 1)),
         "{error}"
     );
     let console = start_console(&settings, assets);
@@ -672,6 +838,8 @@ fn cards_follow_the_quota_fallback(settings: &tl3_config::Store, assets: &Path) 
             assets: assets.into(),
             models: Some(config.models),
             links: Default::default(),
+            public_hosts: vec![],
+            hidden: Default::default(),
         },
     )
     .unwrap();
@@ -707,6 +875,575 @@ fn cards_follow_the_quota_fallback(settings: &tl3_config::Store, assets: &Path) 
     }
 }
 
+fn post(address: SocketAddr, path: &str, headers: &str, body: &str) -> (u16, Vec<u8>) {
+    request_with_body(
+        address,
+        "POST",
+        path,
+        &address.to_string(),
+        &format!("Content-Type: application/json\r\n{headers}"),
+        body,
+    )
+}
+
+/// One raw HTTP/1.1 request, naming whatever Host the caller likes.
+fn request_with_body(
+    address: SocketAddr,
+    method: &str,
+    path: &str,
+    host: &str,
+    headers: &str,
+    body: &str,
+) -> (u16, Vec<u8>) {
+    let mut socket = TcpStream::connect(address).unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    // An oversized body may be refused before it is all read.
+    let _ = write!(
+        socket,
+        "{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nContent-Length: {}\r\n{headers}\r\n{body}",
+        body.len()
+    );
+    let mut reader = BufReader::new(socket);
+    let (status, headers) = response_head(&mut reader);
+    let body = if headers.contains("transfer-encoding: chunked") {
+        ChunkedBody::new(reader).rest()
+    } else {
+        let mut body = Vec::new();
+        let _ = reader.read_to_end(&mut body);
+        body
+    };
+    (status, body)
+}
+
+/// The console files a command through its read-only login; tl3d applies it
+/// on its next drain, and the stream shows it pending, then applied, with the
+/// card's new badge.
+fn a_command_round_trips_to_tl3d_and_back(
+    settings: &tl3_config::Store,
+    assets: &Path,
+    controller: &mut Controller,
+) -> (tl3_console::Running, EventStream, u64) {
+    tl3_store::grant_reader(
+        settings,
+        "tl3_console_filer",
+        settings.password_file.as_deref().unwrap(),
+    )
+    .unwrap();
+    let console = tl3_console::start(
+        TcpListener::bind("127.0.0.1:0").unwrap(),
+        tl3_console::Options {
+            store: tl3_config::Store {
+                user: "tl3_console_filer".into(),
+                ..settings.clone()
+            },
+            assets: assets.into(),
+            models: None,
+            links: Default::default(),
+            public_hosts: vec![],
+            hidden: Default::default(),
+        },
+    )
+    .unwrap();
+    let address = console.address();
+    let mut stream = EventStream::open(address, None);
+    let snapshot = stream.board_event();
+    assert_eq!(snapshot.name, "snapshot");
+    let card = snapshot.data["cards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|card| card["issue"] == 42)
+        .unwrap()
+        .clone();
+    assert!(
+        !card["badges"]
+            .as_array()
+            .unwrap()
+            .contains(&"Paused".into())
+    );
+    let node = card["id"].as_u64().unwrap();
+    let path = format!("/api/requests/{node}/commands");
+    let id = "5c6d7e8f-0000-4000-8000-000000000331";
+    let body = format!(r#"{{"id":"{id}","action":{{"kind":"pause"}}}}"#);
+    let own =
+        format!("X-TL3-Console: 1\r\nOrigin: http://{address}\r\nSec-Fetch-Site: same-origin\r\n");
+    let own = own.as_str();
+    for (headers, status) in [
+        ("", 403),
+        ("X-TL3-Console: 1\r\nOrigin: http://evil.example\r\n", 403),
+        ("X-TL3-Console: 1\r\nSec-Fetch-Site: cross-site\r\n", 403),
+    ] {
+        assert_eq!(post(address, &path, headers, &body).0, status, "{headers}");
+    }
+    assert_eq!(
+        post(
+            address,
+            &path,
+            own,
+            r#"{"id":"x","action":{"kind":"pause"}}"#
+        )
+        .0,
+        422
+    );
+    assert_eq!(
+        post(
+            address,
+            &path,
+            own,
+            &format!(r#"{{"id":"{id}","action":{{"kind":"launch"}}}}"#)
+        )
+        .0,
+        422
+    );
+    let (status, reply) = post(address, &path, own, &body);
+    assert_eq!(status, 202, "{}", String::from_utf8_lossy(&reply));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&reply).unwrap(),
+        serde_json::json!({"id": id, "filed": true})
+    );
+    let (status, reply) = post(address, &path, own, &body);
+    assert_eq!(status, 202);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&reply).unwrap()["filed"],
+        false,
+        "resending the same id files nothing more"
+    );
+    let status_of = |stream: &mut EventStream| -> Option<String> {
+        stream.last_commands.as_ref().and_then(|event| {
+            event["commands"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|command| command["id"] == id)
+                .map(|command| command["status"].as_str().unwrap().to_string())
+        })
+    };
+    while status_of(&mut stream).as_deref() != Some("pending") {
+        let event = stream.event();
+        if event.name == "commands" {
+            stream.last_commands = Some(event.data);
+        }
+    }
+    tl3_controller::ingress::drain(controller).unwrap();
+    let mut paused = false;
+    while !paused || status_of(&mut stream).as_deref() != Some("applied") {
+        let event = stream.event();
+        match event.name.as_str() {
+            "commands" => stream.last_commands = Some(event.data),
+            "patch" => {
+                paused |= event.data["patch"]["upserts"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|card| {
+                        card["id"] == node
+                            && card["badges"]
+                                .as_array()
+                                .unwrap()
+                                .contains(&"Paused".into())
+                    });
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        stream.last_commands.as_ref().unwrap()["commands"][0]["action"],
+        serde_json::json!({"kind": "pause"})
+    );
+    (console, stream, node)
+}
+
+fn filed(settings: &tl3_config::Store, id: &str) -> bool {
+    raw(settings)
+        .query_opt("SELECT 1 FROM tl3_console_commands WHERE id = $1", &[&id])
+        .unwrap()
+        .is_some()
+}
+
+/// Command bodies are small: a few KiB around TL3's 20,000-character cap on
+/// Rob's words. Oversized ones never reach TL3, and the stream doesn't repeat
+/// long texts in every commands event.
+fn commands_stay_small(
+    settings: &tl3_config::Store,
+    console: &tl3_console::Running,
+    stream: &mut EventStream,
+    node: u64,
+) {
+    let address = console.address();
+    let path = format!("/api/requests/{node}/commands");
+    let own =
+        format!("X-TL3-Console: 1\r\nOrigin: http://{address}\r\nSec-Fetch-Site: same-origin\r\n");
+    let comment = |id: &str, chars: usize| {
+        format!(
+            r#"{{"id":"{id}","action":{{"kind":"comment","text":"{}"}}}}"#,
+            "a".repeat(chars)
+        )
+    };
+    let huge = "5c6d7e8f-0000-4000-8000-000000000333";
+    assert_eq!(post(address, &path, &own, &comment(huge, 200_000)).0, 413);
+    assert!(!filed(settings, huge));
+    let over = "5c6d7e8f-0000-4000-8000-000000000334";
+    assert_eq!(post(address, &path, &own, &comment(over, 20_001)).0, 422);
+    let guidance = "5c6d7e8f-0000-4000-8000-000000000336";
+    let long_guidance = format!(
+        r#"{{"id":"{guidance}","action":{{"kind":"answer","question":1,"choice":{{"answer":"try_again","guidance":"{}"}}}}}}"#,
+        "g".repeat(20_001)
+    );
+    assert_eq!(post(address, &path, &own, &long_guidance).0, 422);
+    assert!(!filed(settings, over) && !filed(settings, guidance));
+    let full = "5c6d7e8f-0000-4000-8000-000000000335";
+    assert_eq!(post(address, &path, &own, &comment(full, 20_000)).0, 202);
+    assert!(filed(settings, full));
+    loop {
+        let event = stream.event();
+        if event.name != "commands" {
+            continue;
+        }
+        let Some(shown) = event.data["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|command| command["id"] == full)
+            .cloned()
+        else {
+            continue;
+        };
+        let text = shown["action"]["text"].as_str().unwrap();
+        assert_eq!(text.chars().count(), 201, "{text}");
+        assert!(text.ends_with('…'));
+        break;
+    }
+}
+
+/// The store's own caps on a command come back as HTTP answers that say
+/// which: a command over 64 KiB once stored, and a backlog tl3d isn't draining.
+fn store_refusals_say_why(settings: &tl3_config::Store, console: &tl3_console::Running, node: u64) {
+    let address = console.address();
+    let path = format!("/api/requests/{node}/commands");
+    let own =
+        format!("X-TL3-Console: 1\r\nOrigin: http://{address}\r\nSec-Fetch-Site: same-origin\r\n");
+    // 20,000 characters pass the console's cap, but four bytes each is over the store's.
+    let wide = "5c6d7e8f-0000-4000-8000-000000000337";
+    let body = format!(
+        r#"{{"id":"{wide}","action":{{"kind":"comment","text":"{}"}}}}"#,
+        "\u{1d11e}".repeat(20_000)
+    );
+    let (status, reply) = post(address, &path, &own, &body);
+    assert_eq!(status, 413, "{}", String::from_utf8_lossy(&reply));
+    assert_eq!(
+        String::from_utf8(reply).unwrap(),
+        "This command is over 64 KiB once stored; shorten your words.\n"
+    );
+    assert!(!filed(settings, wide));
+    let mut owner = raw(settings);
+    owner
+        .batch_execute(
+            "INSERT INTO tl3_console_commands (id, node_id, action)
+             SELECT 'backlog-' || n, 0, '{\"kind\":\"pause\"}' FROM generate_series(1, 1000) n",
+        )
+        .unwrap();
+    let late = "5c6d7e8f-0000-4000-8000-000000000338";
+    let body = format!(r#"{{"id":"{late}","action":{{"kind":"pause"}}}}"#);
+    let (status, reply) = post(address, &path, &own, &body);
+    assert_eq!(status, 429, "{}", String::from_utf8_lossy(&reply));
+    assert_eq!(
+        String::from_utf8(reply).unwrap(),
+        "1,000 commands are waiting for TL3 to apply them; try again once it catches up.\n"
+    );
+    assert!(!filed(settings, late));
+    owner
+        .batch_execute("DELETE FROM tl3_console_commands WHERE id LIKE 'backlog-%'")
+        .unwrap();
+}
+
+fn issue_in(repo: &str, number: u64) -> LabelledIssue {
+    LabelledIssue {
+        repo: repo.into(),
+        delivery: format!("hidden-delivery-{repo}-{number}"),
+        ..issue(number)
+    }
+}
+
+/// `hide_repos` (Rob, 2026-11-02): requests of a hidden repository reach the
+/// browser through no route. The board, its stream, the counts, the case file
+/// and the command route all behave as if the repository did not exist. The
+/// store keeps both repositories' requests.
+fn hides_repos_from_every_view(assets: &Path) -> Database {
+    const HIDDEN: &str = "tl3-sandbox";
+    // Its own server: the shared one is near its 20-connection limit, and a
+    // console keeps its sessions for the life of the process.
+    let mut database = Database::start();
+    let settings = database.create("console_hidden");
+    let records = tempfile::tempdir().unwrap();
+    let mut controller = Controller::open(
+        Store::open(&settings).unwrap(),
+        adapters::simulation(records.path()).unwrap(),
+        Bootstrap {
+            repos: vec![
+                Repository {
+                    owner: "RobTand".into(),
+                    name: HIDDEN.into(),
+                    installation: 1,
+                },
+                Repository {
+                    owner: "RobTand".into(),
+                    name: "tl3-console".into(),
+                    installation: 1,
+                },
+            ],
+            ..bootstrap()
+        },
+    )
+    .unwrap();
+    // Nodes 0 and 2 are hidden; 1 and 3 are shown.
+    let first_hidden = 0;
+    let shown = 1;
+    controller.intake(issue_in(HIDDEN, 42)).unwrap();
+    controller.intake(issue_in("tl3-console", 7)).unwrap();
+    let config = tl3_config::Config::parse(include_str!("fixtures/tl3-example.toml")).unwrap();
+    let start = |hidden: HiddenRepos| {
+        tl3_console::start(
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            tl3_console::Options {
+                store: settings.clone(),
+                assets: assets.into(),
+                models: Some(config.models.clone()),
+                links: Default::default(),
+                public_hosts: vec![],
+                hidden,
+            },
+        )
+        .unwrap()
+    };
+    // Cased unlike the stored `RobTand/tl3-sandbox`: GitHub ignores case, so
+    // the store's side of the comparison must too.
+    let console = start(
+        HiddenRepos::new(
+            &[format!("ROBTAND/{}", HIDDEN.to_ascii_uppercase())],
+            &config.github.repos,
+        )
+        .unwrap(),
+    );
+    let address = console.address();
+    let board_of = |address| -> Value {
+        let (status, _, body) = get(address, "/api/board");
+        assert_eq!(status, 200);
+        serde_json::from_slice(&body).unwrap()
+    };
+    let issues = |board: &Value| -> Vec<u64> {
+        board["cards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|card| card["issue"].as_u64().unwrap())
+            .collect()
+    };
+    // The store holds both repositories' requests, so the filter is what hides.
+    let stored: i64 = raw(&settings)
+        .query_one(
+            "SELECT count(*) FROM tl3_world WHERE table_name = 'requests'",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(stored, 2);
+
+    // The stream's snapshot, then the board route: no card, no count and no
+    // word of the hidden repository.
+    let mut stream = EventStream::open_with_guard(address, None, Duration::from_secs(30));
+    let snapshot = stream.board_event();
+    assert_eq!(snapshot.name, "snapshot");
+    assert_eq!(issues(&snapshot.data), [7]);
+    assert!(!snapshot.data.to_string().contains(HIDDEN));
+    let board = board_of(address);
+    assert_eq!(issues(&board), [7]);
+    assert_eq!(board["cards"][0]["repo"], "RobTand/tl3-console");
+    assert_eq!(board["flow"]["in_flight"], 1);
+    let counted: u64 = board["flow"]["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|column| column["count"].as_u64().unwrap())
+        .sum();
+    assert_eq!(counted, 1, "column counts cover shown requests only");
+    assert!(!board.to_string().contains(HIDDEN), "{board}");
+
+    // Every patch after more requests arrive.
+    controller.intake(issue_in(HIDDEN, 43)).unwrap();
+    controller.intake(issue_in("tl3-console", 8)).unwrap();
+    loop {
+        let event = stream.board_event();
+        assert_eq!(event.name, "patch");
+        assert!(!event.data.to_string().contains(HIDDEN), "{}", event.data);
+        let upserts = event.data["patch"]["upserts"].as_array().unwrap();
+        if upserts.iter().any(|card| card["issue"] == 8) {
+            assert_eq!(event.data["patch"]["flow"]["in_flight"], 2);
+            break;
+        }
+    }
+
+    // A newer request for the hidden issue replaces request 0, which then
+    // leaves the board's rows. tl3d writes the replacement's node in the same
+    // commit; the binding alone makes it the newest, so it is all this stores.
+    // An input failure on a hidden issue has no request, and a shown one is
+    // the control.
+    let replacement = 100;
+    let incident = |id: &str, repo: &str, issue: u64| {
+        serde_json::json!({
+            "id": id, "node": null, "open": true, "needs_rob": false, "blocking": false,
+            "summary": format!("Reading {repo}#{issue} failed. Other requests can continue."),
+            "signature": {"upstream": "GitHub", "class": "transport"},
+            "effect": null, "post_key": null, "cause": "upstream",
+            "input_failure": {
+                "scope": format!("intake:robtand/{repo}/1:{issue}"),
+                "target": {
+                    "repository": {"owner": "RobTand", "name": repo, "installation": 1},
+                    "issue": issue,
+                },
+                "title": "Failed read", "posted": true, "attempted_epoch": null,
+            },
+        })
+    };
+    {
+        let mut store = Store::open(&settings).unwrap();
+        let snapshot = store.load().unwrap();
+        let original = snapshot
+            .rows
+            .iter()
+            .find(|row| row.table == "requests" && row.id == first_hidden.to_string())
+            .unwrap()
+            .value
+            .clone();
+        let mut commit =
+            tl3_store::Commit::new("console-hidden-rows", serde_json::json!("rows"), &snapshot);
+        for (table, id, value) in [
+            ("requests", replacement.to_string(), original),
+            (
+                "incidents",
+                "input.hidden".to_string(),
+                incident("input.hidden", HIDDEN, 77),
+            ),
+            (
+                "incidents",
+                "input.shown".to_string(),
+                incident("input.shown", "tl3-console", 78),
+            ),
+        ] {
+            commit.rows.push(tl3_store::RowChange::Put {
+                table: table.into(),
+                id,
+                value,
+            });
+        }
+        store.commit(&commit).unwrap();
+    }
+    // The shown incident reaches the board; the hidden one never does, and
+    // nothing of it reaches a patch on the way.
+    loop {
+        let event = stream.board_event();
+        assert_eq!(event.name, "patch");
+        assert!(!event.data.to_string().contains(HIDDEN), "{}", event.data);
+        assert!(!event.data.to_string().contains("input.hidden"));
+        let shown_incidents = event.data["patch"]["unassigned_incidents"]
+            .as_array()
+            .unwrap();
+        if !shown_incidents.is_empty() {
+            assert_eq!(shown_incidents.len(), 1);
+            assert_eq!(shown_incidents[0]["id"], "input.shown");
+            break;
+        }
+    }
+    // A new connection's snapshot and the board route agree.
+    let mut fresh = EventStream::open_with_guard(address, None, Duration::from_secs(30));
+    let snapshot = fresh.board_event();
+    assert_eq!(snapshot.name, "snapshot");
+    for board in [snapshot.data, board_of(address)] {
+        assert_eq!(board["unassigned_incidents"].as_array().unwrap().len(), 1);
+        assert_eq!(board["unassigned_incidents"][0]["id"], "input.shown");
+        assert!(!board.to_string().contains(HIDDEN), "{board}");
+        assert_eq!(issues(&board), [7, 8]);
+    }
+
+    // The case file and the command route answer 404 for a hidden request,
+    // and file nothing.
+    let open = |address, node: u64| get(address, &format!("/api/requests/{node}")).0;
+    assert_eq!(open(address, first_hidden), 404);
+    assert_eq!(
+        open(address, 2),
+        404,
+        "a request that arrived after startup"
+    );
+    assert_eq!(open(address, shown), 200);
+    let own =
+        format!("X-TL3-Console: 1\r\nOrigin: http://{address}\r\nSec-Fetch-Site: same-origin\r\n");
+    let command = |id: &str| format!(r#"{{"id":"{id}","action":{{"kind":"pause"}}}}"#);
+    let refused = "6d6f6f6e-0000-4000-8000-000000000001";
+    let (status, _) = post(
+        address,
+        &format!("/api/requests/{first_hidden}/commands"),
+        &own,
+        &command(refused),
+    );
+    assert_eq!(status, 404);
+    assert!(
+        !filed(&settings, refused),
+        "nothing filed for a hidden request"
+    );
+    // The replacement is hidden too, though no card or case file shows it.
+    let refused_replacement = "6d6f6f6e-0000-4000-8000-000000000005";
+    let (status, _) = post(
+        address,
+        &format!("/api/requests/{replacement}/commands"),
+        &own,
+        &command(refused_replacement),
+    );
+    assert_eq!(status, 404);
+    assert!(!filed(&settings, refused_replacement));
+    let accepted = "6d6f6f6e-0000-4000-8000-000000000002";
+    let (status, _) = post(
+        address,
+        &format!("/api/requests/{shown}/commands"),
+        &own,
+        &command(accepted),
+    );
+    assert_eq!(status, 202);
+    assert!(filed(&settings, accepted));
+
+    // Commands that reached the store for a hidden request (from an older
+    // console, or tl3d's own tools) never reach the browser either. Request 0
+    // is no longer in the board's rows, yet its command stays hidden.
+    let mut direct = tl3_store::ConsoleCommands::open(&settings).unwrap();
+    let leaked = "6d6f6f6e-0000-4000-8000-000000000003";
+    let pause = serde_json::json!({"kind": "comment", "text": "secret sandbox words"});
+    assert!(direct.submit(leaked, first_hidden, &pause).unwrap());
+    let seen = "6d6f6f6e-0000-4000-8000-000000000004";
+    assert!(
+        direct
+            .submit(seen, shown, &serde_json::json!({"kind": "pause"}))
+            .unwrap()
+    );
+    loop {
+        let event = stream.event();
+        if event.name != "commands" {
+            continue;
+        }
+        let commands = event.data["commands"].as_array().unwrap();
+        assert!(
+            commands
+                .iter()
+                .all(|command| command["node"] != first_hidden),
+            "{commands:?}"
+        );
+        assert!(!event.data.to_string().contains("secret sandbox words"));
+        if commands.iter().any(|command| command["id"] == seen) {
+            break;
+        }
+    }
+    database
+}
+
 /// An HTTP request from the console's page, or from another site's.
 fn send(
     address: SocketAddr,
@@ -715,29 +1452,12 @@ fn send(
     headers: &[(&str, &str)],
     body: Option<&Value>,
 ) -> (u16, Vec<u8>) {
-    let mut socket = TcpStream::connect(address).unwrap();
-    socket
-        .set_read_timeout(Some(Duration::from_secs(60)))
-        .unwrap();
     let body = body.map(Value::to_string).unwrap_or_default();
-    let mut head = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n",
-        body.len()
-    );
+    let mut head = String::from("Content-Type: application/json\r\n");
     for (name, value) in headers {
         head.push_str(&format!("{name}: {value}\r\n"));
     }
-    write!(socket, "{head}\r\n{body}").unwrap();
-    let mut reader = BufReader::new(socket);
-    let (status, headers) = response_head(&mut reader);
-    let body = if headers.contains("transfer-encoding: chunked") {
-        ChunkedBody::new(reader).rest()
-    } else {
-        let mut body = Vec::new();
-        reader.read_to_end(&mut body).unwrap();
-        body
-    };
-    (status, body)
+    request_with_body(address, method, path, &address.to_string(), &head, &body)
 }
 
 fn json_body(response: (u16, Vec<u8>), status: u16) -> Value {
@@ -770,6 +1490,8 @@ fn prompts_edit_and_revert_through_the_api(database: &mut Database, assets: &Pat
                 assets: assets.into(),
                 models: None,
                 links: Default::default(),
+                public_hosts: vec![],
+                hidden: Default::default(),
             },
         )
         .unwrap()
@@ -793,6 +1515,23 @@ fn prompts_edit_and_revert_through_the_api(database: &mut Database, assets: &Pat
     assert_eq!(writer["active"]["text"], builtin);
     let edit = serde_json::json!({"text": "Write for Rob, briefly.", "note": "Shorter notes.", "base": shipped});
     let path = "/api/prompts/writer/versions";
+    for path in [
+        path.to_string(),
+        format!("/api/prompts/writer/activate/{shipped}"),
+        format!("/api/prompts/writer/keep/{shipped}"),
+    ] {
+        let (status, _) = request_with_body(
+            address,
+            "POST",
+            &path,
+            "attacker.invalid",
+            "Content-Type: application/json\r\nX-TL3-Console: 1\r\nOrigin: http://attacker.invalid\r\nSec-Fetch-Site: same-origin\r\n",
+            &edit.to_string(),
+        );
+        assert_eq!(status, 421, "POST {path} with a foreign Host");
+    }
+    let unchanged = json_body(send(address, "GET", "/api/prompts/writer", &[], None), 200);
+    assert_eq!(unchanged, writer, "foreign-Host writes changed the prompt");
     assert_eq!(send(address, "POST", path, &[], Some(&edit)).0, 403);
     let other_site = [
         ("X-TL3-Console", "1"),

@@ -15,6 +15,7 @@ import type {
   StageChange,
   WorkerRun,
 } from "../../api/types.gen";
+import { IssueLink } from "../../components/IssueLink";
 import { elapsed } from "../../time";
 import { useCaseFile } from "./live";
 
@@ -108,14 +109,18 @@ function Disclosure(props: { label: string; children: ReactNode }) {
   );
 }
 
-function Header(props: { card: Card; links: Link[]; title: (heading: ReactElement) => ReactElement }) {
+function Header(props: {
+  card: Card;
+  links: Link[];
+  title: (heading: ReactElement) => ReactElement;
+  actions?: ReactNode;
+}) {
   const { card, links } = props;
   return (
     // The right padding keeps a long title clear of the drawer's close button.
     <header className="pt-4 pr-12 pb-3 pl-4">
       <p className="flex items-center gap-1.5 text-2xs text-muted">
-        <span>{card.repo}</span>
-        <span className="font-mono text-faint">#{card.issue}</span>
+        <IssueLink repo={card.repo} issue={card.issue} />
         <Chip tone="bg-surface-2 text-muted">{COLUMNS[card.column]}</Chip>
         {card.ending !== null && <Chip tone="bg-surface-2 text-muted">{ENDINGS[card.ending]}</Chip>}
       </p>
@@ -142,6 +147,7 @@ function Header(props: { card: Card; links: Link[]; title: (heading: ReactElemen
           ))}
         </ul>
       )}
+      {props.actions}
     </header>
   );
 }
@@ -395,11 +401,18 @@ export function CaseFileView(props: {
   now: number;
   /** Wraps the title heading, so a dialog can be named by it. */
   title?: (heading: ReactElement) => ReactElement;
+  /** What Rob can do with the request, shown under its links. */
+  actions?: ReactNode;
 }) {
   const { file, now } = props;
   return (
     <article className="text-text">
-      <Header card={file.card} links={file.links} title={props.title ?? ((heading) => heading)} />
+      <Header
+        card={file.card}
+        links={file.links}
+        title={props.title ?? ((heading) => heading)}
+        actions={props.actions}
+      />
       <Counters card={file.card} />
       {file.question !== null && <Question question={file.question} />}
       <Timeline timeline={file.timeline} />
@@ -413,7 +426,14 @@ export function CaseFileView(props: {
 }
 
 /** The case file in a drawer over the board, kept current from the board's stream. */
-export function CaseDrawer(props: { id: number | null; card: Card | undefined; now: number; onClose: () => void }) {
+export function CaseDrawer(props: {
+  id: number | null;
+  card: Card | undefined;
+  now: number;
+  onClose: () => void;
+  /** The request's actions, shown in full in the drawer's header. */
+  actions?: (card: Card) => ReactNode;
+}) {
   const { file, error } = useCaseFile(props.id, props.card);
   const shown = file?.card.id === props.id ? file : undefined;
   return (
@@ -443,6 +463,7 @@ export function CaseDrawer(props: { id: number | null; card: Card | undefined; n
                 file={shown}
                 now={props.now}
                 title={(heading) => <Dialog.Title asChild>{heading}</Dialog.Title>}
+                actions={props.card && props.actions?.(props.card)}
               />
             ) : (
               <Dialog.Title className="px-4 pt-12 text-sm font-normal text-muted">

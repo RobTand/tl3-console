@@ -1,5 +1,7 @@
+import type { ReactNode } from "react";
 import type { Badge, Card, Ending } from "../api/types.gen";
 import { elapsed } from "../time";
+import { IssueLink } from "./IssueLink";
 
 const BADGES: Record<Badge, { label: string; tone: string; hint: string }> = {
   Paused: { label: "Paused", tone: "bg-warn-soft text-warn", hint: "Paused by a command; resume to continue" },
@@ -37,8 +39,17 @@ function Chip(props: { tone: string; title: string; children: string }) {
   );
 }
 
-export function BoardCard({ card, now, onOpen }: { card: Card; now: number; onOpen?: (id: number) => void }) {
-  const [owner, name] = card.repo.split("/");
+export function BoardCard({
+  card,
+  now,
+  onOpen,
+  children,
+}: {
+  card: Card;
+  now: number;
+  onOpen?: (id: number) => void;
+  children?: ReactNode;
+}) {
   const retries =
     card.retries.plan + card.retries.audit + card.retries.run_failures + card.retries.effect_failures;
   const worker = [card.role, card.model].filter((part): part is string => part !== null).join(" · ");
@@ -54,10 +65,7 @@ export function BoardCard({ card, now, onOpen }: { card: Card; now: number; onOp
       className="group rounded-md border border-border bg-surface p-2.5 shadow-[var(--shadow)] transition-colors hover:border-border-strong focus-visible:border-accent"
     >
       <header className="flex items-center gap-1.5 text-2xs text-muted">
-        <span className="truncate" title={card.repo}>
-          {name ?? owner}
-        </span>
-        <span className="font-mono text-faint">#{card.issue}</span>
+        <IssueLink repo={card.repo} issue={card.issue} short />
         <span className="ml-auto font-mono text-faint" aria-label="Time in stage">
           {card.phase_since_ms === null ? "–" : elapsed(now - card.phase_since_ms)}
         </span>
@@ -113,6 +121,7 @@ export function BoardCard({ card, now, onOpen }: { card: Card; now: number; onOp
           ))}
         </ul>
       )}
+      {children}
     </article>
   );
 }

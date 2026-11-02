@@ -6,8 +6,11 @@
 
 pub mod api;
 pub mod case_file;
+mod commands;
 pub mod config;
 mod feed;
+pub mod hidden;
+mod hosts;
 mod prompts;
 mod rebuild;
 pub mod schema;
@@ -18,6 +21,7 @@ mod supervise;
 use rebuild::{Change, Rebuilds};
 use schema::Session;
 use std::{
+    collections::BTreeSet,
     net::SocketAddr,
     path::PathBuf,
     sync::{
@@ -27,7 +31,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use supervise::Supervisor;
-use tl3_controller::board::{Board, Rows};
+use tl3_controller::{
+    board::{Board, Rows},
+    console::CommandRecord,
+};
 use tokio::sync::watch;
 
 #[derive(Debug, thiserror::Error)]
@@ -58,6 +65,11 @@ pub struct Options {
     pub models: Option<tl3_config::Models>,
     /// Where the case file's links point.
     pub links: case_file::Links,
+    /// Host names the console answers to besides its listen address, such as a
+    /// tunnel's public name.
+    pub public_hosts: Vec<String>,
+    /// Repositories whose requests the console never shows.
+    pub hidden: hidden::HiddenRepos,
 }
 
 /// A console serving on its own threads.
@@ -84,6 +96,8 @@ pub(crate) struct Published {
     /// Counts board builds, to tell stream events apart.
     pub build: u64,
     pub board: Option<Arc<Board>>,
+    /// The newest console commands and how each settled.
+    pub commands: Option<Arc<Vec<CommandRecord>>>,
     /// The change feed is open and the last build read the store.
     pub connected: bool,
 }
@@ -109,14 +123,19 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         assets,
         models,
         links,
+        public_hosts,
+        hidden,
     } = options;
+    let hosts = hosts::Hosts::new(address, &public_hosts)?;
     let case_files = case_file::CaseFiles {
         store: store.clone(),
         models: models.clone().map(Arc::new),
         links: Arc::new(links),
         sessions: sessions::Sessions::new(case_file::SESSIONS),
+        hidden: hidden.clone(),
     };
     let prompt_store = store.clone();
+    let filer = commands::router(store.clone(), hidden.clone(), case_files.sessions.clone());
     {
         let (store, rebuilds, connected) = (store.clone(), rebuilds.clone(), connected.clone());
         supervisor.spawn("feed", move || feed::run(store, rebuilds, connected))?;
@@ -125,8 +144,12 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         let mut board = Builder {
             store,
             models,
+            hidden,
+            hidden_requests: BTreeSet::new(),
+            hidden_incidents: BTreeSet::new(),
             reader: None,
             rows: None,
+            commands: None,
         };
         let mut retry = feed::Backoff::new();
         while let Some(change) = rebuilds.next() {
@@ -139,7 +162,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
             publish.send_if_modified(|current| {
                 let mut changed = current.connected != live;
                 current.connected = live;
-                if let Ok(board) = &built
+                if let Ok((board, _)) = &built
                     && current
                         .board
                         .as_deref()
@@ -147,6 +170,12 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
                 {
                     current.build += 1;
                     current.board = Some(Arc::new(board.clone()));
+                    changed = true;
+                }
+                if let Ok((_, commands)) = &built
+                    && current.commands.as_deref() != Some(commands)
+                {
+                    current.commands = Some(Arc::new(commands.clone()));
                     changed = true;
                 }
                 changed
@@ -167,8 +196,9 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
     let app = server::router(
         published,
         &assets,
-        case_file::routes(case_files),
+        case_file::routes(case_files).merge(filer),
         prompt_store,
+        hosts,
     );
     supervisor.spawn("http", move || {
         let served = runtime.block_on(async move {
@@ -185,17 +215,29 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
     })
 }
 
+/// Enough for every action a browser is waiting on, and a bulk defer.
+const COMMANDS_SHOWN: i64 = 200;
+
 /// Keeps the last read rows so a progress tick rereads progress alone.
 struct Builder {
     store: tl3_config::Store,
     models: Option<tl3_config::Models>,
+    /// Their requests never reach the board or its commands.
+    hidden: hidden::HiddenRepos,
+    /// Node ids of every hidden repository's requests, as of the last full read.
+    hidden_requests: BTreeSet<u64>,
+    /// Ids of the input-failure incidents on hidden repositories' issues.
+    hidden_incidents: BTreeSet<String>,
     reader: Option<Session>,
     rows: Option<Rows>,
+    /// The newest commands as last read; a progress tick keeps them.
+    commands: Option<Vec<CommandRecord>>,
 }
 
 impl Builder {
-    /// Read the board in one snapshot. A broken session is replaced once.
-    fn build(&mut self, change: Change) -> tl3_controller::Result<Board> {
+    /// Read the board and the newest console commands in one snapshot. A
+    /// broken session is replaced once.
+    fn build(&mut self, change: Change) -> tl3_controller::Result<(Board, Vec<CommandRecord>)> {
         let mut retried = false;
         loop {
             match self.read(change) {
@@ -208,23 +250,44 @@ impl Builder {
         }
     }
 
-    fn read(&mut self, change: Change) -> tl3_controller::Result<Board> {
+    fn read(&mut self, change: Change) -> tl3_controller::Result<(Board, Vec<CommandRecord>)> {
         if self.reader.is_none() {
             self.reader = Some(Session::open(&self.store, "board")?);
         }
         let session = self.reader.as_mut().expect("an open reader");
         let mut tx = session.transaction()?;
         let rows = match (change, self.rows.take()) {
-            (Change::Progress, Some(mut rows)) => {
+            (Change::Progress | Change::Commands, Some(mut rows)) => {
                 rows.refresh_progress(&mut tx)?;
                 rows
             }
-            _ => Rows::read(&mut tx)?,
+            _ => {
+                let mut rows = Rows::read(&mut tx)?;
+                // Dropped before projecting, so the counts leave them out too.
+                self.hidden_requests = self.hidden.requests(&mut tx)?;
+                self.hidden_incidents = self.hidden.incidents(&mut tx)?;
+                rows.requests
+                    .retain(|request| !self.hidden_requests.contains(&request.id.0));
+                rows.unassigned_incidents
+                    .retain(|incident| !self.hidden_incidents.contains(&incident.id));
+                rows
+            }
         };
+        // tl3d settles commands in its own commits, so World rereads them too.
+        let commands = match (change, self.commands.take()) {
+            (Change::Progress, Some(commands)) => commands,
+            _ => {
+                let mut commands =
+                    commands::brief(tl3_controller::console::recent(&mut tx, COMMANDS_SHOWN)?);
+                commands.retain(|command| !self.hidden_requests.contains(&command.node));
+                commands
+            }
+        };
+        self.commands = Some(commands.clone());
         tx.commit().map_err(tl3_store::Error::from)?;
         let board = rows.project(now_ms(), self.models.as_ref());
         self.rows = Some(rows);
-        Ok(board)
+        Ok((board, commands))
     }
 }
 

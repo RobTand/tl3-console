@@ -32,7 +32,11 @@ credit: number | null,
 /**
  * When the request entered its current phase, in Unix milliseconds.
  */
-phase_since_ms: number | null, last_progress: string | null, incidents: Array<CardIncident>, badges: Array<Badge>, };
+phase_since_ms: number | null, last_progress: string | null, incidents: Array<CardIncident>, badges: Array<Badge>, 
+/**
+ * The open question, with the options Rob can answer from the console.
+ */
+question: CardQuestion | null, };
 
 export type CardIncident = { id: string, summary: string, };
 
@@ -172,12 +176,12 @@ evidence: string,
  */
 report: string | null, };
 
-export type QuestionOption = { action: string, outcome: string, };
+export type PendingOption = { action: string, outcome: string, };
 
 /**
  * The question waiting on Rob, as the writer was asked to put it.
  */
-export type PendingQuestion = { id: number, kind: string, obstacle: string, options: Array<QuestionOption>, 
+export type PendingQuestion = { id: number, kind: string, obstacle: string, options: Array<PendingOption>, 
 /**
  * An index into `options`.
  */
@@ -198,35 +202,75 @@ export type Link = { kind: LinkKind,
 label: string, url: string, };
 
 /**
- * One version of a role's system prompt. `number` counts a role's versions from 1.
+ * An open question as Rob sees it on the issue, with its options.
  */
-export type PromptVersion = { id: number, number: number, text: string, builtin: boolean, author: string, note: string, created_ms: number, };
+export type CardQuestion = { 
+/**
+ * The number Rob names when he answers on GitHub.
+ */
+id: number, prompt: string, options: Array<QuestionOption>, 
+/**
+ * The index of TL3's recommended option.
+ */
+recommended: number, reason: string, 
+/**
+ * Why "Let TL3 decide" can't apply the recommendation; None when it can.
+ */
+defer_blocked: string | null, 
+/**
+ * The one decision the question asks, from the deciding worker's findings (#322).
+ */
+decision: string | null, 
+/**
+ * The deciding worker's findings and evidence, as the writer received them (#322).
+ */
+findings: Record<string, unknown> | null, };
+
+export type QuestionOption = { answer: AnswerKind, label: string, outcome: string, detail: Detail | null, };
 
 /**
- * A version in a role's history, without its text. Fetch the text from
- * `GET /api/prompts/{role}/versions/{id}`.
+ * A question option's answer, without its details.
  */
-export type PromptSummary = { id: number, number: number, builtin: boolean, author: string, note: string, created_ms: number, };
+export type AnswerKind = "continue" | "stop" | "retry" | "mark_handled" | "try_again" | "add_credit" | "change_request";
 
 /**
- * A role's prompt: the active version, its history, newest first, and a
- * built-in version a deploy shipped while another stayed active.
+ * What an option needs from Rob before it can apply.
  */
-export type RolePrompt = { role: string, active: PromptVersion, activated_by: string, activated_ms: number, builtin_update: PromptVersion | null, versions: Array<PromptSummary>, };
+export type Detail = "text" | "guidance" | "amount";
+
+export type Action = { "kind": "pause", } | { "kind": "resume", } | { "kind": "stop", } | { "kind": "restart", } | { "kind": "clear_incident", incident: string, } | { "kind": "answer", question: number, choice: Choice, } | { "kind": "defer", question: number, } | { "kind": "comment", text: string, };
 
 /**
- * A role in the prompt list.
+ * One of a question's options, with the details it needs from Rob.
  */
-export type PromptRole = { role: string, active_number: number, active_builtin: boolean, builtin_update: boolean, };
+export type Choice = { "answer": "continue", } | { "answer": "stop", } | { "answer": "retry", } | { "answer": "mark_handled", } | { "answer": "try_again", guidance: string, } | { "answer": "add_credit", amount: number, } | { "answer": "change_request", text: string, };
 
 /**
- * `POST /api/prompts/{role}/versions`: a version that becomes active at
- * once. `base` is the active version the edit started from.
+ * `POST /api/requests/{id}/commands`.
  */
-export type NewPromptVersion = { text: string, note: string, base: number, };
+export type CommandRequest = { 
+/**
+ * A lowercase UUID the browser chooses; resending it files nothing more.
+ */
+id: string, action: Action, };
 
 /**
- * `POST /api/prompts/{role}/activate/{version}`: `expected` is the version
- * the page showed as active.
+ * The answer to a command: filed for tl3d, or already filed under this id.
  */
-export type ActivateVersion = { expected: number, };
+export type Filed = { id: string, filed: boolean, };
+
+export type CommandStatus = "pending" | "applied" | "refused";
+
+/**
+ * A filed command and how it settled.
+ */
+export type CommandRecord = { id: string, node: number, 
+/**
+ * None when the stored action isn't one this console knows.
+ */
+action: Action | null, status: CommandStatus, reason: string | null, received_ms: number, settled_ms: number | null, };
+
+/**
+ * The stream's `commands` event: the newest filed commands and how each settled.
+ */
+export type CommandsEvent = { commands: Array<CommandRecord>, };

@@ -3,11 +3,17 @@
 
 use crate::case_file::{
     BlockedReport, CaseFile, CaseIncident, ChildItem, ClosingSummary, IncidentCause, Link,
-    LinkKind, PendingQuestion, QuestionOption, RunStatus, StageChange, WorkerRun,
+    LinkKind, PendingQuestion, RunStatus, StageChange, WorkerRun,
 };
 use serde::{Deserialize, Serialize};
-use tl3_controller::board::{
-    Badge, Board, BoardPatch, Card, CardIncident, Column, ColumnCount, Ending, Flow, Retries,
+use tl3_controller::{
+    board::{
+        Badge, Board, BoardPatch, Card, CardIncident, Column, ColumnCount, Ending, Flow, Retries,
+    },
+    console::{
+        Action, AnswerKind, CardQuestion, Choice, CommandRecord, CommandStatus, Detail,
+        QuestionOption,
+    },
 };
 use ts_rs::TS;
 
@@ -86,6 +92,28 @@ pub struct ActivateVersion {
     pub expected: i64,
 }
 
+/// `POST /api/requests/{id}/commands`.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct CommandRequest {
+    /// A lowercase UUID the browser chooses; resending it files nothing more.
+    pub id: String,
+    pub action: Action,
+}
+
+/// The answer to a command: filed for tl3d, or already filed under this id.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+pub struct Filed {
+    pub id: String,
+    pub filed: bool,
+}
+
+/// The stream's `commands` event: the newest filed commands and how each settled.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+pub struct CommandsEvent {
+    pub commands: Vec<CommandRecord>,
+}
+
 /// The generated `web/src/api/types.gen.ts`.
 pub fn typescript() -> String {
     let config = ts_rs::Config::new().with_large_int("number");
@@ -113,7 +141,10 @@ pub fn typescript() -> String {
         (IncidentCause::docs(), IncidentCause::decl(&config)),
         (CaseIncident::docs(), CaseIncident::decl(&config)),
         (BlockedReport::docs(), BlockedReport::decl(&config)),
-        (QuestionOption::docs(), QuestionOption::decl(&config)),
+        (
+            crate::case_file::QuestionOption::docs(),
+            crate::case_file::QuestionOption::decl(&config),
+        ),
         (PendingQuestion::docs(), PendingQuestion::decl(&config)),
         (ClosingSummary::docs(), ClosingSummary::decl(&config)),
         (LinkKind::docs(), LinkKind::decl(&config)),
@@ -124,6 +155,17 @@ pub fn typescript() -> String {
         (PromptRole::docs(), PromptRole::decl(&config)),
         (NewPromptVersion::docs(), NewPromptVersion::decl(&config)),
         (ActivateVersion::docs(), ActivateVersion::decl(&config)),
+        (CardQuestion::docs(), CardQuestion::decl(&config)),
+        (QuestionOption::docs(), QuestionOption::decl(&config)),
+        (AnswerKind::docs(), AnswerKind::decl(&config)),
+        (Detail::docs(), Detail::decl(&config)),
+        (Action::docs(), Action::decl(&config)),
+        (Choice::docs(), Choice::decl(&config)),
+        (CommandRequest::docs(), CommandRequest::decl(&config)),
+        (Filed::docs(), Filed::decl(&config)),
+        (CommandStatus::docs(), CommandStatus::decl(&config)),
+        (CommandRecord::docs(), CommandRecord::decl(&config)),
+        (CommandsEvent::docs(), CommandsEvent::decl(&config)),
     ] {
         output.push('\n');
         output.push_str(&docs.unwrap_or_default());

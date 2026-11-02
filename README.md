@@ -138,15 +138,72 @@ user = "tl3_console"
 password_file = "/home/rob/.config/tl3/secrets/console-postgres-password"
 tl3_config = "/home/rob/.config/tl3/tl3.toml"
 traces = "http://192.168.1.107:5033/#/experiments/2/traces"
+public_hosts = ["console.example.test"]
+hide_repos = ["RobTand/tl3-sandbox"]
 ```
 
 `traces` is optional. With it, the case file links each worker run to its
 MLflow traces; without it, runs have no trace link. Deploy writes the file only
 once, so add the line by hand to an existing install and restart the console.
 
+`public_hosts` is optional. See "Host names" below.
+
+`hide_repos` is optional and defaults to none. See "Hidden repositories" below.
+
 The console reads `tl3.toml` with the pinned TL3's own parser and uses only its
 `[store]` and `[models]` sections and its served repositories, whose branch
 templates name the case file's branch links.
+
+## Hidden repositories
+
+`hide_repos` lists served repositories (`owner/name`, without regard to case)
+whose requests the console never shows. The console filters on the server, so
+nothing hidden reaches the browser:
+
+- the board snapshot, every stream patch and the flow counts leave the
+  repository's requests out, and so do Needs Rob and "Let TL3 decide on all";
+- open incidents that name the repository without belonging to a request,
+  which TL3 raises when it fails to read one of its issues, leave the list of
+  incidents without a request;
+- the `commands` stream event leaves out commands filed for its requests,
+  including requests a newer one replaced;
+- the case file (`GET /api/requests/{id}`) and the command route
+  (`POST /api/requests/{id}/commands`) answer `404` for its requests and file
+  nothing. The command route checks the request's repository before it reads
+  the body.
+
+An entry that isn't one of TL3's served repositories (`github.repos` in
+`tl3.toml`) fails `tl3-console check` and the console's start with a message
+that names it, so a typo can't quietly hide nothing. Deploy runs `check` before
+it installs. Incidents that name no repository, such as a failed read of the
+operations repository, still show. Add the line to the config by hand and
+restart the console.
+
+## Host names
+
+A web page on another site can point its own host name at the console's
+address (DNS rebinding). The browser then treats the console as that site and
+sends that name as `Host` and `Origin`, so checking `Origin` against `Host`
+proves nothing. The console answers only to the `Host` names it serves and
+refuses every other request with `421 Misdirected Request`. Nothing is served.
+That holds for every route, reads and the event stream included, and for
+requests with no `Host`.
+
+The console serves:
+
+- its `listen` address with the port, for example `192.168.1.107:8034`;
+- `localhost:<port>`, when `listen` is a loopback address;
+- each name in `public_hosts`, such as a tunnel's public name, compared without
+  regard to case. Give the port too when clients use one. A name is letters,
+  digits and `.-:[]`; the console refuses to start on anything else.
+
+A browser that reaches the console by another name, such as a DNS alias, gets
+`421` until you add that name to `public_hosts` and restart the console.
+`npm run dev` proxies `/api` with the console's own `Host`, so it works too.
+
+Every route also reads at most 64 KiB of request body. A larger body gets
+`413`. The limit sits next to the allowlist in `server::harden`, so a route
+added later is covered without extra code.
 
 ## The TL3 pin
 
