@@ -52,6 +52,11 @@ export function usePromptVersion(role: string, id: number | null) {
 export function usePromptEdits(role: string) {
   const client = useQueryClient();
   const settle = {
+    onError: (error: Error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        void client.invalidateQueries({ queryKey: roleKey(role), exact: true });
+      }
+    },
     onSuccess: (prompt: RolePrompt) => {
       client.setQueryData(roleKey(role), prompt);
       void client.invalidateQueries({ queryKey: ["prompts"], exact: true });

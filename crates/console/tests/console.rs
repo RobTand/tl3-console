@@ -64,6 +64,8 @@ fn main() {
     store_refusals_say_why(&settings, &filer, node);
     println!("test store_refusals_say_why ... ok");
     drop(filer);
+    prompt_store_errors_have_actionable_responses(assets.path());
+    println!("test prompt_store_errors_have_actionable_responses ... ok");
     let prompt_database = prompts_edit_and_revert_through_the_api(assets.path());
     println!("test prompts_edit_and_revert_through_the_api ... ok");
     drop(controller);
@@ -84,7 +86,7 @@ fn main() {
     database.stop();
     hidden_database.stop();
     prompt_database.stop();
-    println!("19 console scenarios passed; no skips");
+    println!("20 console scenarios passed; no skips");
 }
 
 fn bootstrap() -> Bootstrap {
@@ -1470,6 +1472,107 @@ fn json_body(response: (u16, Vec<u8>), status: u16) -> Value {
         String::from_utf8_lossy(&response.1)
     );
     serde_json::from_slice(&response.1).unwrap()
+}
+
+/// Real SQLSTATEs from the embedded store, followed by a connection outage.
+fn prompt_store_errors_have_actionable_responses(assets: &Path) {
+    let mut database = Database::start();
+    let settings = database.create("prompt_errors");
+    let mut store = Store::open(&settings).unwrap();
+    tl3_controller::prompts::seed(&mut store).unwrap();
+    let login = "console_prompt_errors";
+    tl3_store::grant_reader(&settings, login, settings.password_file.as_deref().unwrap()).unwrap();
+    let console = tl3_console::start(
+        TcpListener::bind("127.0.0.1:0").unwrap(),
+        tl3_console::Options {
+            store: tl3_config::Store {
+                user: login.into(),
+                ..settings.clone()
+            },
+            assets: assets.into(),
+            models: None,
+            links: Default::default(),
+            public_hosts: vec![],
+            hidden: Default::default(),
+        },
+    )
+    .unwrap();
+    let address = console.address();
+    let role = json_body(send(address, "GET", "/api/prompts/writer", &[], None), 200);
+    let base = role["active"]["id"].as_i64().unwrap();
+    let page = [("X-TL3-Console", "1")];
+    let path = "/api/prompts/writer/versions";
+    let edit = serde_json::json!({"text": "An edit.", "note": "Why.", "base": base});
+    let mut admin = raw(&settings);
+    let sessions = |admin: &mut postgres::Client| -> Vec<i32> {
+        admin
+            .query(
+                "SELECT pid FROM pg_stat_activity WHERE usename = $1 ORDER BY pid",
+                &[&login],
+            )
+            .unwrap()
+            .iter()
+            .map(|row| row.get(0))
+            .collect()
+    };
+    let original = sessions(&mut admin);
+    admin
+        .batch_execute("REVOKE tl3_prompt_editor FROM console_prompt_errors")
+        .unwrap();
+    let denied = send(address, "POST", path, &page, Some(&edit));
+    let after_denied = sessions(&mut admin);
+    admin
+        .batch_execute("GRANT tl3_prompt_editor TO console_prompt_errors")
+        .unwrap();
+    let nul = serde_json::json!({"text": "Bad\0text", "note": "Why.", "base": base});
+    let invalid = send(address, "POST", path, &page, Some(&nul));
+    let after_invalid = sessions(&mut admin);
+    admin
+        .batch_execute(
+            "CREATE FUNCTION reject_prompt_text() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN RAISE EXCEPTION 'Prompt text cannot be converted' USING ERRCODE = '22001'; END $$;
+         CREATE TRIGGER reject_prompt_text BEFORE INSERT ON tl3_prompt_versions
+         FOR EACH ROW EXECUTE FUNCTION reject_prompt_text();",
+        )
+        .unwrap();
+    let other_text = send(address, "POST", path, &page, Some(&edit));
+    let after_other = sessions(&mut admin);
+    admin
+        .batch_execute("DROP TRIGGER reject_prompt_text ON tl3_prompt_versions")
+        .unwrap();
+    // Closing the real socket must return 503, then open a fresh session on recovery.
+    drop(admin);
+    drop(store);
+    database.stop();
+    let unavailable = send(address, "POST", path, &page, Some(&edit));
+    database.resume();
+    let recovered = send(address, "POST", path, &page, Some(&edit));
+    database.stop();
+    let statuses = [
+        denied.0,
+        invalid.0,
+        other_text.0,
+        unavailable.0,
+        recovered.0,
+    ];
+    assert_eq!(
+        statuses,
+        [500, 422, 422, 503, 201],
+        "permission (42501), NUL (22021), text (22001), I/O outage, recovery; bodies: {:?}",
+        [&denied.1, &invalid.1, &other_text.1, &unavailable.1]
+            .map(|body| String::from_utf8_lossy(body))
+    );
+    assert!(String::from_utf8_lossy(&denied.1).contains(
+        "The console's database login can't edit prompts; TL3's deploy grants it (tl3-deploy console-role)"));
+    assert!(String::from_utf8_lossy(&invalid.1).contains("invalid byte sequence"));
+    assert!(String::from_utf8_lossy(&other_text.1).contains("Prompt text cannot be converted"));
+    assert!(String::from_utf8_lossy(&unavailable.1).contains("Try again shortly"));
+    assert_eq!(
+        original, after_denied,
+        "permission denial dropped the session"
+    );
+    assert_eq!(original, after_invalid, "bad text dropped the session");
+    assert_eq!(original, after_other, "data exception dropped the session");
 }
 
 /// Rob saves a prompt version, sees it active, and reverts it, through a

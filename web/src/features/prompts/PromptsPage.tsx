@@ -1,10 +1,9 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { ToggleGroup } from "radix-ui";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { PromptRole, PromptSummary, RolePrompt } from "../../api/types.gen";
 import { href } from "../../route";
 import { elapsed, useNow } from "../../time";
-import { ApiError, roleKey, usePromptEdits, usePromptRoles, usePromptVersion, useRolePrompt } from "./api";
+import { ApiError, usePromptEdits, usePromptRoles, usePromptVersion, useRolePrompt } from "./api";
 import { PromptDiff, PromptEditor } from "./CodeViews";
 import { lineChanges } from "./diff";
 
@@ -91,22 +90,16 @@ type Handoff = {
 
 function RolePanel({ role }: { role: string }) {
   const prompt = useRolePrompt(role);
-  const client = useQueryClient();
   const [handoff, setHandoff] = useState<Handoff>({});
   if (prompt.error) return <Notice tone="text-danger">{prompt.error.message}</Notice>;
   if (!prompt.data) return <Notice tone="text-muted">Loading the {role} prompt…</Notice>;
   return (
-    // A new active version, from this page or another, starts a fresh
-    // workspace, so an edit is never saved against a version it wasn't made on.
+    // A new workspace uses the current base and carries any unsaved edit into its diff.
     <Workspace
       key={prompt.data.active.id}
       prompt={prompt.data}
       handoff={handoff}
       onHandoff={setHandoff}
-      onStale={(kept) => {
-        setHandoff({ kept });
-        void client.invalidateQueries({ queryKey: roleKey(role), exact: true });
-      }}
     />
   );
 }
@@ -115,7 +108,6 @@ function Workspace(props: {
   prompt: RolePrompt;
   handoff: Handoff;
   onHandoff: (handoff: Handoff) => void;
-  onStale: (kept: NonNullable<Handoff["kept"]>) => void;
 }) {
   const { prompt } = props;
   const now = useNow();
@@ -139,7 +131,6 @@ function Workspace(props: {
   const closing = useRef(false);
   const blockedId = useId();
   const onHandoff = props.onHandoff;
-  useEffect(() => onHandoff({}), [onHandoff]);
   useEffect(() => {
     if (compare === null && closing.current) {
       closing.current = false;
@@ -149,6 +140,44 @@ function Workspace(props: {
   const compared = usePromptVersion(prompt.role, compare?.id ?? null);
   const text = draft ?? active.text;
   const changed = text !== active.text;
+  useEffect(() => {
+    onHandoff(changed ? { kept: { text, note, from: active.id } } : {});
+  }, [onHandoff, changed, text, note, active.id]);
+  useEffect(() => {
+    if (!changed) return;
+    let accepted = window.location.href;
+    const confirm = () => window.confirm("Discard your unsaved prompt edit?");
+    const click = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (!(link instanceof HTMLAnchorElement) || link.download || (link.target && link.target !== "_self")) return;
+      // Full page navigation uses the browser's beforeunload confirmation.
+      if (link.origin !== window.location.origin || link.pathname !== window.location.pathname || link.search !== window.location.search) return;
+      if (link.href === window.location.href) return;
+      if (confirm()) accepted = link.href;
+      else {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    const hashchange = () => {
+      if (window.location.href !== accepted && !confirm()) {
+        window.history.replaceState(null, "", accepted);
+      } else accepted = window.location.href;
+    };
+    const beforeunload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    document.addEventListener("click", click, true);
+    window.addEventListener("hashchange", hashchange, true);
+    window.addEventListener("beforeunload", beforeunload);
+    return () => {
+      document.removeEventListener("click", click, true);
+      window.removeEventListener("hashchange", hashchange, true);
+      window.removeEventListener("beforeunload", beforeunload);
+    };
+  }, [changed]);
   const counts = useMemo(() => lineChanges(active.text, text), [active.text, text]);
   const next = (prompt.versions[0]?.number ?? 0) + 1;
   const pending = edits.save.isPending || edits.activate.isPending || edits.keep.isPending;
@@ -180,11 +209,6 @@ function Workspace(props: {
       { text, note, base: active.id },
       {
         onSuccess: () => props.onHandoff({ focusEditor: true }),
-        onError: (error) => {
-          if (error instanceof ApiError && error.status === 409) {
-            props.onStale({ text, note, from: active.id });
-          }
-        },
       },
     );
   };
