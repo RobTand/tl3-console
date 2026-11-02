@@ -215,11 +215,12 @@ function Timeline({ timeline }: { timeline: StageChange[] }) {
           {timeline.map((change) => (
             <li
               key={`${change.revision}-${change.step}`}
-              className="grid grid-cols-[7.5rem_5.5rem_1fr] items-baseline gap-2 border-l border-border py-1 pl-3"
+              className="grid grid-cols-[auto_1fr] items-baseline gap-x-3 border-l border-border py-1 pl-3 sm:grid-cols-[9.5rem_5.5rem_1fr]"
             >
               <Time ms={change.at_ms} />
               <span className="text-2xs font-medium text-muted">{COLUMNS[change.column]}</span>
-              <span className="min-w-0 text-xs">
+              {/* On a phone the step takes its own line under the time and stage. */}
+              <span className="col-span-2 min-w-0 text-xs sm:col-span-1">
                 <span className="text-text">{change.step}</span>
                 <span className="text-muted"> · {change.cause}</span>
               </span>
