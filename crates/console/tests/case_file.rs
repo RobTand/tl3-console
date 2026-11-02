@@ -50,6 +50,7 @@ fn main() {
             assets: assets.path().into(),
             models: Some(config.models),
             links: Links::new(Some(&traces), &[repository()]).unwrap(),
+            public_hosts: vec![],
         },
     )
     .unwrap();
@@ -284,6 +285,7 @@ fn case_file_on_a_store_ahead_of_the_pin(settings: &tl3_config::Store, assets: &
             assets: assets.into(),
             models: None,
             links: Default::default(),
+            public_hosts: vec![],
         },
     )
     .unwrap();
@@ -558,7 +560,7 @@ fn get(address: SocketAddr, path: &str) -> (u16, Vec<u8>) {
         .unwrap();
     write!(
         socket,
-        "GET {path} HTTP/1.1\r\nHost: console\r\nConnection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
     )
     .unwrap();
     let mut reader = BufReader::new(socket);
