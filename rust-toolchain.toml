@@ -1,0 +1,4 @@
+[toolchain]
+# The toolchain TL3 builds with; deploy and CI use the same one.
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]

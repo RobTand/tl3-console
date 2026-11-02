@@ -5,7 +5,7 @@
 //! controller until request #42 changes column and prints `{"column": ...}`.
 //! Closing stdin stops Postgres and exits.
 
-#[path = "../../store/tests/support/mod.rs"]
+#[path = "../tests/support/mod.rs"]
 mod support;
 
 use serde_json::json;
@@ -104,7 +104,7 @@ fn main() {
             store: settings.clone(),
             assets,
             models: Some(
-                tl3_config::Config::parse(include_str!("../../config/example.toml"))
+                tl3_config::Config::parse(include_str!("../tests/fixtures/tl3-example.toml"))
                     .unwrap()
                     .models,
             ),

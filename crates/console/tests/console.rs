@@ -1,4 +1,3 @@
-#[path = "../../store/tests/support/mod.rs"]
 mod support;
 
 use serde_json::Value;
@@ -505,7 +504,7 @@ fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
 /// Q53: when the maker's model reports quota, the card names the fallback the
 /// worker will run, as soon as the quota row commits.
 fn cards_follow_the_quota_fallback(settings: &tl3_config::Store, assets: &Path) {
-    let config = tl3_config::Config::parse(include_str!("../../config/example.toml")).unwrap();
+    let config = tl3_config::Config::parse(include_str!("fixtures/tl3-example.toml")).unwrap();
     let console = tl3_console::start(
         TcpListener::bind("127.0.0.1:0").unwrap(),
         tl3_console::Options {

@@ -9,7 +9,7 @@
 //! PrismaBuild: `cargo run --release -p tl3-console --example board_scale`.
 //! It exits 1 when a median exceeds its budget.
 
-#[path = "../../store/tests/support/mod.rs"]
+#[path = "../tests/support/mod.rs"]
 mod support;
 
 use std::time::{Duration, Instant};
