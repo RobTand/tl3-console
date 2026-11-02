@@ -5,14 +5,18 @@
 #![forbid(unsafe_code)]
 
 pub mod api;
+pub mod case_file;
 pub mod config;
 mod feed;
 mod prompts;
 mod rebuild;
+pub mod schema;
 mod server;
+mod sessions;
 mod supervise;
 
 use rebuild::{Change, Rebuilds};
+use schema::Session;
 use std::{
     net::SocketAddr,
     path::PathBuf,
@@ -24,7 +28,6 @@ use std::{
 };
 use supervise::Supervisor;
 use tl3_controller::board::{Board, Rows};
-use tl3_store::Reader;
 use tokio::sync::watch;
 
 #[derive(Debug, thiserror::Error)]
@@ -39,6 +42,10 @@ pub enum Error {
     Stopped(&'static str),
     #[error("the store refused the console: {0}")]
     Store(#[from] tl3_store::Error),
+    #[error("{0}")]
+    Tl3(#[from] tl3_controller::Error),
+    #[error("stored JSON is not what TL3 writes: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -49,6 +56,8 @@ pub struct Options {
     pub assets: PathBuf,
     /// Model ladders, to name each card's model.
     pub models: Option<tl3_config::Models>,
+    /// Where the case file's links point.
+    pub links: case_file::Links,
 }
 
 /// A console serving on its own threads.
@@ -80,10 +89,10 @@ pub(crate) struct Published {
 }
 
 /// Open one read-only session the way the board does. Fails when the store's
-/// schema is not the one the pinned TL3 commit migrates to.
-pub fn check(store: &tl3_config::Store) -> Result<()> {
-    Reader::open(store)?;
-    Ok(())
+/// schema is older than the pinned TL3 commit's or disagrees with it. Returns
+/// the migration versions the store has beyond the pin, none when it matches.
+pub fn check(store: &tl3_config::Store) -> Result<Vec<i32>> {
+    Ok(Session::open(store, "check")?.extra().to_vec())
 }
 
 /// Serve on an already bound listener. The board, its change feed and the
@@ -99,8 +108,15 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         store,
         assets,
         models,
+        links,
     } = options;
-    let app = server::router(published, &assets, store.clone());
+    let case_files = case_file::CaseFiles {
+        store: store.clone(),
+        models: models.clone().map(Arc::new),
+        links: Arc::new(links),
+        sessions: sessions::Sessions::new(case_file::SESSIONS),
+    };
+    let prompt_store = store.clone();
     {
         let (store, rebuilds, connected) = (store.clone(), rebuilds.clone(), connected.clone());
         supervisor.spawn("feed", move || feed::run(store, rebuilds, connected))?;
@@ -148,6 +164,12 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         .thread_name("tl3-console-http")
         .enable_all()
         .build()?;
+    let app = server::router(
+        published,
+        &assets,
+        case_file::routes(case_files),
+        prompt_store,
+    );
     supervisor.spawn("http", move || {
         let served = runtime.block_on(async move {
             let listener = tokio::net::TcpListener::from_std(listener)?;
@@ -167,7 +189,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
 struct Builder {
     store: tl3_config::Store,
     models: Option<tl3_config::Models>,
-    reader: Option<Reader>,
+    reader: Option<Session>,
     rows: Option<Rows>,
 }
 
@@ -188,7 +210,7 @@ impl Builder {
 
     fn read(&mut self, change: Change) -> tl3_controller::Result<Board> {
         if self.reader.is_none() {
-            self.reader = Some(Reader::open(&self.store)?);
+            self.reader = Some(Session::open(&self.store, "board")?);
         }
         let session = self.reader.as_mut().expect("an open reader");
         let mut tx = session.transaction()?;

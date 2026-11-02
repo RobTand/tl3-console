@@ -77,24 +77,122 @@ export type DatabaseStatus = { connected: boolean, };
  */
 export type PatchEvent = { base: string, patch: BoardPatch, };
 
+export type CaseFile = { 
 /**
- * One version of a role's system prompt. `number` counts a role's versions from 1.
+ * The controller revision this case file shows.
  */
-export type PromptVersion = { id: number, number: number, text: string, builtin: boolean, author: string, note: string, created_ms: number, };
+revision: number, 
+/**
+ * The request as the board shows it, with its counters and credit.
+ */
+card: Card, 
+/**
+ * Stage changes, oldest first.
+ */
+timeline: Array<StageChange>, children: Array<ChildItem>, 
+/**
+ * Worker runs, oldest first.
+ */
+runs: Array<WorkerRun>, 
+/**
+ * Open incidents first, then cleared ones.
+ */
+incidents: Array<CaseIncident>, blocked: Array<BlockedReport>, question: PendingQuestion | null, summary: ClosingSummary | null, links: Array<Link>, };
 
 /**
- * A role's prompt: the active version, its history, newest first, and a
- * built-in version a deploy shipped while another stayed active.
+ * A step that moved the request to a stage, from the audit event log: the
+ * commit that started the step, and the kernel event that commit recorded.
  */
-export type RolePrompt = { role: string, active: number, activated_by: string, activated_ms: number, builtin_update: number | null, versions: Array<PromptVersion>, };
+export type StageChange = { revision: number, 
+/**
+ * When the commit landed, in Unix milliseconds.
+ */
+at_ms: number, column: Column, step: string, 
+/**
+ * What the controller recorded as the reason, in plain words.
+ */
+cause: string, };
 
 /**
- * A role in the prompt list.
+ * Work that continues this request: pieces a plan proposed, or a request
+ * that replaced it.
  */
-export type PromptRole = { role: string, active_number: number, active_builtin: boolean, builtin_update: boolean, };
+export type ChildItem = { 
+/**
+ * The child's request; proposed pieces have none yet.
+ */
+id: number | null, title: string, column: Column | null, stage: string, files: Array<string>, };
+
+export type RunStatus = "Running" | "Finished" | "Failed" | "Cancelled";
+
+export type WorkerRun = { 
+/**
+ * The run's effect key.
+ */
+key: string, role: string, generation: number, attempt: number, round: number, model: string | null, effort: string | null, started_ms: number, ended_ms: number | null, 
+/**
+ * None: the store doesn't record token use yet. The trace has it.
+ */
+tokens: number | null, status: RunStatus, outcome: string, 
+/**
+ * The run's MLflow traces, found by their tags.
+ */
+trace_url: string | null, };
 
 /**
- * `POST /api/prompts/{role}/versions`: a version that becomes active at
- * once. `base` is the active version the edit started from.
+ * Q51: TL3's own code, prompts, tools or harness, or an outside service
+ * such as GitHub, Mergify, PrismaBuild or the model proxy.
  */
-export type NewPromptVersion = { text: string, note: string, base: number, };
+export type IncidentCause = "Tl3" | "Outside";
+
+export type CaseIncident = { id: string, summary: string, open: boolean, cause: IncidentCause, needs_rob: boolean, blocking: boolean, 
+/**
+ * The upstream that failed, such as GitHub or Workers.
+ */
+source: string, 
+/**
+ * The failure signature's class.
+ */
+class: string, 
+/**
+ * The effect whose delivery failed, if one did.
+ */
+effect: string | null, };
+
+/**
+ * Q50: a maker that TL3's environment stopped, and what it cited.
+ */
+export type BlockedReport = { generation: number | null, 
+/**
+ * The worker-checked evidence the reply cited.
+ */
+evidence: string, 
+/**
+ * The maker's own report. Model text; it never goes to GitHub.
+ */
+report: string | null, };
+
+export type QuestionOption = { action: string, outcome: string, };
+
+/**
+ * The question waiting on Rob, as the writer was asked to put it.
+ */
+export type PendingQuestion = { id: number, kind: string, obstacle: string, options: Array<QuestionOption>, 
+/**
+ * An index into `options`.
+ */
+recommended_option: number, recommendation_reason: string, how_to_answer: string, 
+/**
+ * False when posting the question failed.
+ */
+posted: boolean, };
+
+export type ClosingSummary = { ending: Ending, outcome: string, unmet_goals: Array<string>, removed_changes: string | null, note: string | null, };
+
+export type LinkKind = "Issue" | "PullRequest" | "Branch" | "MergeQueue";
+
+export type Link = { kind: LinkKind, 
+/**
+ * The link's accessible name.
+ */
+label: string, url: string, };

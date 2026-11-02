@@ -32,6 +32,7 @@ fn main() {
             store: reader.clone(),
             assets: assets.path().into(),
             models: None,
+            links: Default::default(),
         },
     )
     .unwrap();
@@ -53,12 +54,20 @@ fn main() {
     drop(controller);
     builds_once_the_store_is_migrated(&mut database, assets.path());
     println!("test builds_once_the_store_is_migrated ... ok");
-    refuses_a_schema_it_does_not_match(&mut database, assets.path());
-    println!("test refuses_a_schema_it_does_not_match ... ok");
+    accepts_an_equal_schema(&mut database);
+    println!("test accepts_an_equal_schema ... ok");
+    pinned_migrations_match_the_pinned_tl3(&mut database);
+    println!("test pinned_migrations_match_the_pinned_tl3 ... ok");
+    accepts_a_newer_schema_with_a_warning(&mut database, assets.path());
+    println!("test accepts_a_newer_schema_with_a_warning ... ok");
+    refuses_an_older_schema(&mut database, assets.path());
+    println!("test refuses_an_older_schema ... ok");
+    refuses_a_conflicting_schema(&mut database, assets.path());
+    println!("test refuses_a_conflicting_schema ... ok");
     streams_again_after_postgres_restarts(address, &mut database, &settings, records.path());
     println!("test streams_again_after_postgres_restarts ... ok");
     database.stop();
-    println!("10 console scenarios passed; no skips");
+    println!("14 console scenarios passed; no skips");
 }
 
 fn bootstrap() -> Bootstrap {
@@ -494,6 +503,7 @@ fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
             store: settings.clone(),
             assets: assets.into(),
             models: None,
+            links: Default::default(),
         },
     )
     .unwrap();
@@ -505,36 +515,145 @@ fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
     assert_eq!(event.data["cards"], serde_json::json!([]));
 }
 
-/// A TL3 deploy that migrates past the pinned commit: the deploy's check and
-/// the board both refuse the store until the pin moves.
-fn refuses_a_schema_it_does_not_match(database: &mut Database, assets: &Path) {
-    let settings = database.create("console_newer_schema");
-    drop(Store::open(&settings).unwrap());
-    tl3_console::check(&settings).unwrap();
-    raw(&settings)
+/// The highest migration the pinned TL3 applies to a store it opens.
+fn pinned_version(settings: &tl3_config::Store) -> i32 {
+    raw(settings)
+        .query_one("SELECT MAX(version) FROM tl3_schema_migrations", &[])
+        .unwrap()
+        .get(0)
+}
+
+fn add_migration(settings: &tl3_config::Store, version: i32) {
+    raw(settings)
         .execute(
-            "INSERT INTO tl3_schema_migrations VALUES (999, 'SELECT 1')",
-            &[],
+            "INSERT INTO tl3_schema_migrations VALUES ($1, 'SELECT 1')",
+            &[&version],
         )
         .unwrap();
-    let error = tl3_console::check(&settings).unwrap_err().to_string();
-    assert!(error.contains("schema version 999"), "{error}");
-    let console = tl3_console::start(
+}
+
+fn start_console(settings: &tl3_config::Store, assets: &Path) -> tl3_console::Running {
+    tl3_console::start(
         TcpListener::bind("127.0.0.1:0").unwrap(),
         tl3_console::Options {
             store: settings.clone(),
             assets: assets.into(),
             models: None,
+            links: Default::default(),
         },
     )
-    .unwrap();
+    .unwrap()
+}
+
+/// A store the pinned TL3 migrated passes the deploy's check with nothing to
+/// warn about.
+fn accepts_an_equal_schema(database: &mut Database) {
+    let settings = database.create("console_equal_schema");
+    drop(Store::open(&settings).unwrap());
+    assert_eq!(tl3_console::check(&settings).unwrap(), Vec::<i32>::new());
+}
+
+/// `migrations.pin` is what lets the console tell a newer store from a
+/// conflicting one, so it must be what the pinned TL3 really applies.
+fn pinned_migrations_match_the_pinned_tl3(database: &mut Database) {
+    let settings = database.create("console_pinned_migrations");
+    drop(Store::open(&settings).unwrap());
+    let applied: Vec<(i32, String)> = raw(&settings)
+        .query(
+            "SELECT version, md5(sql) FROM tl3_schema_migrations ORDER BY version",
+            &[],
+        )
+        .unwrap()
+        .iter()
+        .map(|row| (row.get(0), row.get(1)))
+        .collect();
+    let lines: String = applied
+        .iter()
+        .map(|(version, md5)| format!("{version} {md5}\n"))
+        .collect();
+    assert_eq!(
+        tl3_console::schema::pinned_migrations(),
+        applied,
+        "update crates/console/migrations.pin to:\n{lines}"
+    );
+}
+
+/// A TL3 deploy that migrates past the pinned commit: the deploy's check and
+/// the board keep working, and the log says which versions are extra.
+fn accepts_a_newer_schema_with_a_warning(database: &mut Database, assets: &Path) {
+    let settings = database.create("console_newer_schema");
+    drop(Store::open(&settings).unwrap());
+    let next = pinned_version(&settings) + 1;
+    add_migration(&settings, next);
+    add_migration(&settings, next + 1);
+    let extra = tl3_console::check(&settings).unwrap();
+    assert_eq!(extra, [next, next + 1]);
+    let warning = tl3_console::schema::warning(&extra);
+    assert!(
+        warning.contains(&next.to_string()) && warning.contains(&(next + 1).to_string()),
+        "{warning}"
+    );
+    assert!(warning.contains("pin"), "{warning}");
+    let console = start_console(&settings, assets);
+    let mut stream = EventStream::open_with_guard(console.address(), None, Duration::from_secs(20));
+    assert_eq!(stream.board_event().name, "snapshot");
+    assert_eq!(get(console.address(), "/api/board").0, 200);
+}
+
+/// A store behind the pinned TL3 lacks tables the board reads.
+fn refuses_an_older_schema(database: &mut Database, assets: &Path) {
+    let settings = database.create("console_older_schema");
+    drop(Store::open(&settings).unwrap());
+    let pinned = pinned_version(&settings);
+    let sql: String = raw(&settings)
+        .query_one(
+            "DELETE FROM tl3_schema_migrations WHERE version = $1 RETURNING sql",
+            &[&pinned],
+        )
+        .unwrap()
+        .get(0);
+    let error = tl3_console::check(&settings).unwrap_err().to_string();
+    assert!(
+        error.contains(&format!("schema version {}", pinned - 1)),
+        "{error}"
+    );
+    let console = start_console(&settings, assets);
     assert_eq!(get(console.address(), "/api/board").0, 503);
     let mut stream = EventStream::open_with_guard(console.address(), None, Duration::from_secs(20));
     raw(&settings)
-        .execute("DELETE FROM tl3_schema_migrations WHERE version = 999", &[])
+        .execute(
+            "INSERT INTO tl3_schema_migrations VALUES ($1, $2)",
+            &[&pinned, &sql],
+        )
         .unwrap();
     assert_eq!(stream.board_event().name, "snapshot");
-    tl3_console::check(&settings).unwrap();
+}
+
+/// A newer store that disagrees with the pin about a version both know is not
+/// the pinned TL3's schema plus additions.
+fn refuses_a_conflicting_schema(database: &mut Database, assets: &Path) {
+    let settings = database.create("console_conflicting_schema");
+    drop(Store::open(&settings).unwrap());
+    add_migration(&settings, pinned_version(&settings) + 1);
+    raw(&settings)
+        .execute(
+            "UPDATE tl3_schema_migrations SET sql = 'changed' WHERE version = 1",
+            &[],
+        )
+        .unwrap();
+    let error = tl3_console::check(&settings).unwrap_err().to_string();
+    assert!(error.contains("migration"), "{error}");
+    let console = start_console(&settings, assets);
+    assert_eq!(get(console.address(), "/api/board").0, 503);
+    drop(console);
+    // A pinned version missing from a newer store is a conflict too.
+    let settings = database.create("console_missing_migration");
+    drop(Store::open(&settings).unwrap());
+    add_migration(&settings, pinned_version(&settings) + 1);
+    raw(&settings)
+        .execute("DELETE FROM tl3_schema_migrations WHERE version = 3", &[])
+        .unwrap();
+    assert!(tl3_console::check(&settings).is_err());
 }
 
 /// Q53: when the maker's model reports quota, the card names the fallback the
@@ -547,6 +666,7 @@ fn cards_follow_the_quota_fallback(settings: &tl3_config::Store, assets: &Path) 
             store: settings.clone(),
             assets: assets.into(),
             models: Some(config.models),
+            links: Default::default(),
         },
     )
     .unwrap();
@@ -646,6 +766,7 @@ fn prompts_edit_and_revert_through_the_api(database: &mut Database, assets: &Pat
             },
             assets: assets.into(),
             models: None,
+            links: Default::default(),
         },
     )
     .unwrap();

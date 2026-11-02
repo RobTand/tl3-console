@@ -1,0 +1,14 @@
+# The pinned TL3's store migrations: version and the md5 Postgres computes over
+# each migration's SQL text. A test compares this file with a store the pinned
+# TL3 migrated. See "The TL3 pin" in the README.
+1 5a671216710f4857707c334aa2971834
+2 9635fd852d2de0d100e524bc9cc7ae68
+3 913b5c6c365ea56efd3fdd93c5214990
+4 38f69bf63a8e22906b09d550e4d0e939
+5 5ac0182b903a8efc9e31bbc5f3fffb79
+6 5687d38f112eeef7b14c05de1291bf56
+7 76179542e8ca94171454bbd3a696b9e0
+8 590217d0b6ffecbbcfed7a234dfffefa
+9 02f54721f8c976b4b8627e7a1cd75d3c
+10 10f7d5033959c7ceafee4e80ea41c183
+12 26bcc1aec3aadb0348e0ec82ff9dca24

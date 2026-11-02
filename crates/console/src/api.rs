@@ -1,6 +1,10 @@
 //! The console's HTTP API types. The web app's TypeScript types are generated
 //! from these and the board's, so the two can't drift.
 
+use crate::case_file::{
+    BlockedReport, CaseFile, CaseIncident, ChildItem, ClosingSummary, IncidentCause, Link,
+    LinkKind, PendingQuestion, QuestionOption, RunStatus, StageChange, WorkerRun,
+};
 use serde::{Deserialize, Serialize};
 use tl3_controller::board::{
     Badge, Board, BoardPatch, Card, CardIncident, Column, ColumnCount, Ending, Flow, Retries,
@@ -82,6 +86,19 @@ pub fn typescript() -> String {
         (Retries::docs(), Retries::decl(&config)),
         (DatabaseStatus::docs(), DatabaseStatus::decl(&config)),
         (PatchEvent::docs(), PatchEvent::decl(&config)),
+        (CaseFile::docs(), CaseFile::decl(&config)),
+        (StageChange::docs(), StageChange::decl(&config)),
+        (ChildItem::docs(), ChildItem::decl(&config)),
+        (RunStatus::docs(), RunStatus::decl(&config)),
+        (WorkerRun::docs(), WorkerRun::decl(&config)),
+        (IncidentCause::docs(), IncidentCause::decl(&config)),
+        (CaseIncident::docs(), CaseIncident::decl(&config)),
+        (BlockedReport::docs(), BlockedReport::decl(&config)),
+        (QuestionOption::docs(), QuestionOption::decl(&config)),
+        (PendingQuestion::docs(), PendingQuestion::decl(&config)),
+        (ClosingSummary::docs(), ClosingSummary::decl(&config)),
+        (LinkKind::docs(), LinkKind::decl(&config)),
+        (Link::docs(), Link::decl(&config)),
         (PromptVersion::docs(), PromptVersion::decl(&config)),
         (RolePrompt::docs(), RolePrompt::decl(&config)),
         (PromptRole::docs(), PromptRole::decl(&config)),

@@ -30,6 +30,7 @@ const RETRY: Duration = Duration::from_secs(1);
 pub(crate) fn router(
     published: watch::Receiver<Published>,
     assets: &Path,
+    case_files: Router,
     store: tl3_config::Store,
 ) -> Router {
     let app = ServeDir::new(assets).fallback(ServeFile::new(assets.join("index.html")));
@@ -39,6 +40,7 @@ pub(crate) fn router(
         .route("/api/{*rest}", get(not_found))
         .fallback_service(app)
         .with_state(published)
+        .merge(case_files)
         .merge(crate::prompts::routes(store))
         .layer(SetResponseHeaderLayer::overriding(
             header::CONTENT_SECURITY_POLICY,

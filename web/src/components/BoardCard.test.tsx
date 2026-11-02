@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { BoardCard } from "./BoardCard";
 import { card } from "../fixtures";
 
@@ -65,5 +66,14 @@ describe("BoardCard", () => {
     render(<BoardCard now={1_000} card={card({ id: 1, title: "<img src=x onerror=alert(1)>" })} />);
     expect(screen.getByText("<img src=x onerror=alert(1)>")).toBeVisible();
     expect(document.querySelector("img")).toBeNull();
+  });
+
+  it("opens the request's case file from its title", async () => {
+    const opened: number[] = [];
+    render(<BoardCard now={1_000} card={card({ id: 3, title: "Fix tile seams" })} onOpen={(id) => opened.push(id)} />);
+    const title = screen.getByRole("link", { name: "Fix tile seams" });
+    expect(title).toHaveAttribute("href", "?request=3");
+    await userEvent.click(title);
+    expect(opened).toEqual([3]);
   });
 });
