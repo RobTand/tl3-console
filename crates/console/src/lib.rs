@@ -10,11 +10,13 @@ pub mod config;
 mod feed;
 mod hosts;
 mod rebuild;
+pub mod schema;
 mod server;
 mod sessions;
 mod supervise;
 
 use rebuild::{Change, Rebuilds};
+use schema::Session;
 use std::{
     net::SocketAddr,
     path::PathBuf,
@@ -26,7 +28,6 @@ use std::{
 };
 use supervise::Supervisor;
 use tl3_controller::board::{Board, Rows};
-use tl3_store::Reader;
 use tokio::sync::watch;
 
 #[derive(Debug, thiserror::Error)]
@@ -91,10 +92,10 @@ pub(crate) struct Published {
 }
 
 /// Open one read-only session the way the board does. Fails when the store's
-/// schema is not the one the pinned TL3 commit migrates to.
-pub fn check(store: &tl3_config::Store) -> Result<()> {
-    Reader::open(store)?;
-    Ok(())
+/// schema is older than the pinned TL3 commit's or disagrees with it. Returns
+/// the migration versions the store has beyond the pin, none when it matches.
+pub fn check(store: &tl3_config::Store) -> Result<Vec<i32>> {
+    Ok(Session::open(store, "check")?.extra().to_vec())
 }
 
 /// Serve on an already bound listener. The board, its change feed and the
@@ -187,7 +188,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
 struct Builder {
     store: tl3_config::Store,
     models: Option<tl3_config::Models>,
-    reader: Option<Reader>,
+    reader: Option<Session>,
     rows: Option<Rows>,
 }
 
@@ -208,7 +209,7 @@ impl Builder {
 
     fn read(&mut self, change: Change) -> tl3_controller::Result<Board> {
         if self.reader.is_none() {
-            self.reader = Some(Reader::open(&self.store)?);
+            self.reader = Some(Session::open(&self.store, "board")?);
         }
         let session = self.reader.as_mut().expect("an open reader");
         let mut tx = session.transaction()?;

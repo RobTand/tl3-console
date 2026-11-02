@@ -92,9 +92,11 @@ fn main() {
     assert_eq!(get(address, "/api/requests/99").0, 404);
     assert_eq!(get(address, "/api/requests/not-a-number").0, 400);
     println!("test case_files_never_reach_mlflow ... ok");
+    case_file_on_a_store_ahead_of_the_pin(&settings, assets.path());
+    println!("test case_file_on_a_store_ahead_of_the_pin ... ok");
     drop(controller);
     database.stop();
-    println!("5 case file scenarios passed; no skips");
+    println!("6 case file scenarios passed; no skips");
 }
 
 fn repository() -> tl3_config::Repository {
@@ -255,6 +257,67 @@ fn role_name(role: Role) -> &'static str {
         Role::Make => "maker",
         Role::Review => "reviewer",
     }
+}
+
+/// A TL3 deploy that migrates past the pin must not take the drawer down with
+/// it: the case-file sessions accept the store like the board's, and say why.
+fn case_file_on_a_store_ahead_of_the_pin(settings: &tl3_config::Store, assets: &Path) {
+    let mut admin = postgres::Config::new()
+        .host(&settings.host)
+        .port(settings.port)
+        .user(&settings.user)
+        .dbname(&settings.database)
+        .password("tl3-disposable-test-password")
+        .connect(postgres::NoTls)
+        .unwrap();
+    let ahead: i32 = admin
+        .query_one(
+            "INSERT INTO tl3_schema_migrations \
+             SELECT MAX(version) + 1, 'SELECT 1' FROM tl3_schema_migrations RETURNING version",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    let console = tl3_console::start(
+        TcpListener::bind("127.0.0.1:0").unwrap(),
+        tl3_console::Options {
+            store: settings.clone(),
+            assets: assets.into(),
+            models: None,
+            links: Default::default(),
+            public_hosts: vec![],
+        },
+    )
+    .unwrap();
+    let log = capture_stderr(|| get(console.address(), &format!("/api/requests/{MERGED}")));
+    let (status, body) = log.0;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    let warning = log
+        .1
+        .lines()
+        .find(|line| line.contains("case file") && line.contains("beyond"))
+        .unwrap_or_else(|| panic!("no case-file warning in:\n{}", log.1));
+    assert!(warning.contains(&ahead.to_string()), "{warning}");
+    drop(console);
+    admin
+        .execute(
+            "DELETE FROM tl3_schema_migrations WHERE version = $1",
+            &[&ahead],
+        )
+        .unwrap();
+}
+
+/// What `run` returns, and what the process wrote to stderr meanwhile.
+fn capture_stderr<T>(run: impl FnOnce() -> T) -> (T, String) {
+    let mut file = tempfile::tempfile().unwrap();
+    let saved = rustix::io::dup(rustix::stdio::stderr()).unwrap();
+    rustix::stdio::dup2_stderr(&file).unwrap();
+    let result = run();
+    rustix::stdio::dup2_stderr(&saved).unwrap();
+    let mut text = String::new();
+    std::io::Seek::rewind(&mut file).unwrap();
+    file.read_to_string(&mut text).unwrap();
+    (result, text)
 }
 
 fn case_file(files: &Files, id: u64) -> Value {

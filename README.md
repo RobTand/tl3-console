@@ -113,7 +113,8 @@ dl380g10:
    writes `~/.config/tl3-console/console.toml` from the `[console]` section of
    TL3's `tl3.toml`. It never overwrites that file afterwards.
 3. It runs the new binary's `check` against the live store, which fails when
-   the store's schema is not the pinned TL3's.
+   the store's schema is older than the pinned TL3's or disagrees with it. A
+   store that is ahead passes with a warning.
 4. It installs the release under `~/.local/share/tl3-console/releases/`, points
    `~/.local/share/tl3-console/current` at it, installs
    `deploy/tl3-console.service`, and restarts only `tl3-console.service`.
@@ -182,11 +183,21 @@ The console uses TL3's crates (`tl3-config`, `tl3-store`, `tl3-controller` and
 the crates they need) at one TL3 commit. `Cargo.toml` names it once, under
 `[workspace.dependencies]`, and Bazel reads it from `Cargo.lock`.
 
-The pinned commit must match the TL3 deployed on dl380g10. The console refuses
-a store whose migrations differ from the pinned TL3's. `tl3-console check`
-fails, and the board stays unavailable until the schema matches. So bump the
-pin in a console pull request after each TL3 deploy that changes the store
-schema, the board projection or `tl3.toml`'s format:
+The pinned commit should be the TL3 deployed on dl380g10, or an older one.
+TL3's migrations only add, so the console accepts a store whose applied
+migrations are the pinned TL3's plus newer versions. It logs a warning that
+names the extra versions, each time the board, the case file or
+`tl3-console check` opens a store session, and keeps serving. Every store
+session opens through `schema::Session`, so they all follow this rule. It refuses a store that is older than the pin, or that lacks or
+changes a migration the pin knows. `crates/console/migrations.pin` lists the
+pinned TL3's migrations with an md5 of each one's SQL, which is how the
+console tells the two apart. A console test checks that file against a store
+the pinned TL3 migrates.
+
+A warning means a TL3 deploy added migrations. The board may lack what they
+add: the console shows only what the pinned projection reads. Bump the pin in
+a console pull request when a TL3 deploy changes the store schema, the board
+projection or `tl3.toml`'s format:
 
 1. Replace the commit in the four `rev = "..."` entries in `Cargo.toml`.
 2. Run `cargo update -p tl3-config -p tl3-controller -p tl3-kernel -p tl3-store`.
@@ -194,4 +205,7 @@ schema, the board projection or `tl3.toml`'s format:
    `bazel --bazelrc=<rc with startup --max_idle_secs=300> query //... --lockfile_mode=update`.
 4. If TL3's `crates/store/tests/support` or `crates/config/example.toml`
    changed, copy them into `crates/console/tests`.
-5. Open the pull request, queue it, and deploy once it merges.
+5. Run the console test. If `pinned_migrations_match_the_pinned_tl3` fails,
+   replace the body of `crates/console/migrations.pin` with the lines it
+   prints.
+6. Open the pull request, queue it, and deploy once it merges.
