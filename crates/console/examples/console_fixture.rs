@@ -224,13 +224,22 @@ fn main() {
         && controller.drive_once().unwrap()
     {}
     for (number, title, ends_in) in [
-        (DUPLICATE, "Add the console's board to the status page", Column::Cancelled),
-        (ALREADY_DONE, "Show merge counts on the flow strip", Column::Done),
+        (
+            DUPLICATE,
+            "Add the console's board to the status page",
+            Column::Cancelled,
+        ),
+        (
+            ALREADY_DONE,
+            "Show merge counts on the flow strip",
+            Column::Done,
+        ),
     ] {
         controller
             .intake(issue("tl3-sandbox", number, title))
             .unwrap();
-        while column(&settings, "tl3-sandbox", number) != ends_in && controller.drive_once().unwrap()
+        while column(&settings, "tl3-sandbox", number) != ends_in
+            && controller.drive_once().unwrap()
         {}
     }
     controller

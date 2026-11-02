@@ -538,7 +538,8 @@ fn effects(tx: &mut Transaction<'_>, stored: &Stored) -> crate::Result<Vec<Effec
 
 /// The stage each step moved the request to, and the step's name. Steps
 /// that don't move a request (stopping a run, withdrawing checks, notes) have none.
-fn step(output: Output) -> Option<(Column, &'static str)> {
+/// The closing steps move it to `ended`, the column its ending puts it in.
+fn step(output: Output, ended: Column) -> Option<(Column, &'static str)> {
     Some(match output {
         Output::Effect { kind, .. } => match kind {
             EffectKind::StartRun(Role::Ingest) => (Column::Intake, "Reader started"),
@@ -553,7 +554,7 @@ fn step(output: Output) -> Option<(Column, &'static str)> {
             EffectKind::PostApproval => (Column::Merging, "Approval posted"),
             EffectKind::Enqueue => (Column::Merging, "Sent to the merge queue"),
             EffectKind::StartRebase => (Column::Merging, "Branch update started"),
-            EffectKind::ClosePr | EffectKind::RemoveWorktree => (Column::Done, "Cleaning up"),
+            EffectKind::ClosePr | EffectKind::RemoveWorktree => (ended, "Cleaning up"),
             EffectKind::StopRun | EffectKind::WithdrawJob => return None,
         },
         Output::Notice {
@@ -563,7 +564,7 @@ fn step(output: Output) -> Option<(Column, &'static str)> {
         Output::Notice {
             notice: Notice::Summary(_),
             ..
-        } => (Column::Done, "Closing summary posted"),
+        } => (ended, "Closing summary posted"),
         _ => return None,
     })
 }
@@ -573,8 +574,13 @@ fn step(output: Output) -> Option<(Column, &'static str)> {
 /// A repeated step, such as a retried run, adds nothing.
 fn timeline(stored: &Stored, effects: &[Effect], card: &Card) -> Vec<StageChange> {
     let mut timeline: Vec<StageChange> = Vec::new();
+    let ended = if card.ending.is_some() {
+        card.column
+    } else {
+        Column::Done
+    };
     for effect in effects {
-        let Some((column, step)) = step(effect.delivery.output) else {
+        let Some((column, step)) = step(effect.delivery.output, ended) else {
             continue;
         };
         if timeline

@@ -17,11 +17,16 @@ const BADGES: Record<Badge, { label: string; tone: string; hint: string }> = {
     tone: "bg-surface-2 text-muted",
     hint: "Waiting for a planner, a slot or its files",
   },
+  Stopped: {
+    label: "Stopped",
+    tone: "bg-warn-soft text-warn",
+    hint: "Stopped; the issue is still open. Restart it to start again",
+  },
 };
 
 const ENDINGS: Record<Ending, { label: string; tone: string; hint: string }> = {
   Merged: { label: "Merged", tone: "bg-ok-soft text-ok", hint: "Merged into the default branch" },
-  Stopped: { label: "Stopped", tone: "bg-surface-2 text-muted", hint: "Stopped by a command" },
+  Stopped: { label: "Stopped", tone: "bg-warn-soft text-warn", hint: "Stopped; the issue is still open" },
   Replaced: { label: "Replaced", tone: "bg-surface-2 text-muted", hint: "A newer request replaced this one" },
   Duplicate: { label: "Duplicate", tone: "bg-surface-2 text-muted", hint: "Another request covers this work" },
   AlreadyDone: { label: "Already done", tone: "bg-surface-2 text-muted", hint: "The work was already done" },
@@ -54,7 +59,8 @@ export function BoardCard({
     card.retries.plan + card.retries.audit + card.retries.run_failures + card.retries.effect_failures;
   const worker = [card.role, card.model].filter((part): part is string => part !== null).join(" · ");
   const chips = [
-    ...(card.ending === null ? [] : [ENDINGS[card.ending]]),
+    // The Stopped badge already says it, with the restart hint.
+    ...(card.ending === null || card.ending === "Stopped" ? [] : [ENDINGS[card.ending]]),
     ...card.badges.map((badge) => BADGES[badge]),
   ];
   return (
