@@ -76,4 +76,45 @@ describe("BoardCard", () => {
     await userEvent.click(title);
     expect(opened).toEqual([3]);
   });
+
+  it("links the issue to GitHub in a new tab, and that click leaves the case file closed", async () => {
+    const opened: number[] = [];
+    render(
+      <BoardCard
+        now={1_000}
+        card={card({ id: 2, issue: 128, repo: "RobTand/prismaquant" })}
+        onOpen={(id) => opened.push(id)}
+      />,
+    );
+    const link = screen.getByRole("link", { name: "prismaquant#128" });
+    expect(link).toHaveAttribute("href", "https://github.com/RobTand/prismaquant/issues/128");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noreferrer");
+    await userEvent.click(link);
+    expect(opened).toEqual([]);
+  });
+
+  it("reaches the issue link from the keyboard, between the card and its title", async () => {
+    const user = userEvent.setup();
+    const opened: number[] = [];
+    render(<BoardCard now={1_000} card={card({ id: 3, title: "Fix tile seams" })} onOpen={(id) => opened.push(id)} />);
+    await user.tab();
+    expect(screen.getByRole("article")).toHaveFocus();
+    await user.tab();
+    const link = screen.getByRole("link", { name: "tl3-sandbox#43" });
+    expect(link).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(opened).toEqual([]);
+    await user.tab();
+    expect(screen.getByRole("link", { name: "Fix tile seams" })).toHaveFocus();
+  });
+
+  it("keeps links out of buttons", () => {
+    const { container } = render(
+      <BoardCard now={1_000} card={card({ id: 4 })}>
+        <button type="button">Pause</button>
+      </BoardCard>,
+    );
+    expect(container.querySelector("button a, a a, a button")).toBeNull();
+  });
 });

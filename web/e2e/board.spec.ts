@@ -39,6 +39,66 @@ test("board screenshots in both themes", async ({ page }) => {
     }
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: `${process.env.TL3_SCREENSHOTS}/board-phone.png` });
+    // A card with its issue link at rest and under the pointer.
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.goto(fixture.url);
+      const card = page.getByRole("region", { name: "Needs Rob" }).getByRole("article", { name: /tl3-sandbox#43:/ });
+      await expect(card).toBeVisible();
+      await card.getByRole("link", { name: "tl3-sandbox#43" }).hover();
+      await card.screenshot({ path: `${process.env.TL3_SCREENSHOTS}/issue-link-hover-${scheme}.png` });
+      await card.getByRole("link", { name: "tl3-sandbox#43" }).focus();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab");
+      await card.screenshot({ path: `${process.env.TL3_SCREENSHOTS}/issue-link-focus-${scheme}.png` });
+    }
+  } finally {
+    await fixture.stop();
+  }
+});
+
+test("an issue reference opens GitHub in a new tab and leaves the case file closed", async ({ page, context }) => {
+  const fixture = await startFixture();
+  try {
+    // The tab only has to be asked for; the test never needs GitHub itself.
+    await context.route("https://github.com/**", (route) =>
+      route.fulfill({ status: 200, contentType: "text/html", body: "<title>GitHub</title>" }),
+    );
+    await page.goto(fixture.url);
+    const card = page.getByRole("region", { name: "Needs Rob" }).getByRole("article", { name: /tl3-sandbox#43:/ });
+    const link = card.getByRole("link", { name: "tl3-sandbox#43" });
+    const issue = "https://github.com/RobTand/tl3-sandbox/issues/43";
+    await expect(link).toHaveAttribute("href", issue);
+    await expect(link).toHaveAttribute("target", "_blank");
+
+    const clicked = context.waitForEvent("page");
+    await link.click();
+    const tab = await clicked;
+    await tab.waitForURL(issue);
+    await tab.close();
+    expect(new URL(page.url()).search).toBe("");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+
+    // The same from the keyboard: the card, then its issue link.
+    await card.focus();
+    await page.keyboard.press("Tab");
+    await expect(link).toBeFocused();
+    const entered = context.waitForEvent("page");
+    await page.keyboard.press("Enter");
+    const second = await entered;
+    await second.waitForURL(issue);
+    await second.close();
+    expect(new URL(page.url()).search).toBe("");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+
+    // The drawer's header links to the same page as the case file's own link.
+    await card.getByRole("heading").getByRole("link").click();
+    const drawer = page.getByRole("dialog");
+    await expect(drawer).toBeVisible();
+    const header = drawer.getByRole("link", { name: "RobTand/tl3-sandbox#43" });
+    await expect(header).toHaveAttribute("href", issue);
+    await expect(drawer.getByRole("link", { name: "Issue RobTand/tl3-sandbox#43 on GitHub" })).toHaveAttribute("href", issue);
   } finally {
     await fixture.stop();
   }

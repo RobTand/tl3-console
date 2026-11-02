@@ -21,6 +21,15 @@ describe("CaseFileView", () => {
     expect(screen.getByRole("link", { name: "Pull request #7 on GitHub" })).toBeVisible();
   });
 
+  it("links the header's issue reference to the same page the case file's own link names", () => {
+    render(<CaseFileView file={caseFile()} now={T0} />);
+    const header = screen.getByRole("link", { name: "RobTand/tl3-sandbox#102" });
+    const served = caseFile().links.find((link) => link.kind === "Issue")!;
+    expect(header).toHaveAttribute("href", served.url);
+    expect(header).toHaveAttribute("target", "_blank");
+    expect(header).toHaveAttribute("rel", "noreferrer");
+  });
+
   it("counts attempts, rounds, retries, failures and credit", () => {
     render(
       <CaseFileView

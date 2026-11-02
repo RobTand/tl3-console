@@ -8,6 +8,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use support::Database;
+use tl3_console::hidden::HiddenRepos;
 use tl3_controller::{Bootstrap, Controller, LabelledIssue, Repository, adapters, board};
 use tl3_store::{Reader, Store};
 
@@ -34,6 +35,7 @@ fn main() {
             models: None,
             links: Default::default(),
             public_hosts: vec![],
+            hidden: Default::default(),
         },
     )
     .unwrap();
@@ -73,10 +75,12 @@ fn main() {
     println!("test refuses_an_older_schema ... ok");
     refuses_a_conflicting_schema(&mut database, assets.path());
     println!("test refuses_a_conflicting_schema ... ok");
+    hides_repos_from_every_view(&mut database, assets.path());
+    println!("test hides_repos_from_every_view ... ok");
     streams_again_after_postgres_restarts(address, &mut database, &settings, records.path());
     println!("test streams_again_after_postgres_restarts ... ok");
     database.stop();
-    println!("17 console scenarios passed; no skips");
+    println!("18 console scenarios passed; no skips");
 }
 
 fn bootstrap() -> Bootstrap {
@@ -553,6 +557,7 @@ fn refuses_hosts_the_console_does_not_serve(settings: &tl3_config::Store, assets
             models: None,
             links: Default::default(),
             public_hosts: vec!["Console.Example.Test".into()],
+            hidden: Default::default(),
         },
     )
     .unwrap();
@@ -664,6 +669,7 @@ fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
             models: None,
             links: Default::default(),
             public_hosts: vec![],
+            hidden: Default::default(),
         },
     )
     .unwrap();
@@ -701,6 +707,7 @@ fn start_console(settings: &tl3_config::Store, assets: &Path) -> tl3_console::Ru
             models: None,
             links: Default::default(),
             public_hosts: vec![],
+            hidden: Default::default(),
         },
     )
     .unwrap()
@@ -829,6 +836,7 @@ fn cards_follow_the_quota_fallback(settings: &tl3_config::Store, assets: &Path) 
             models: Some(config.models),
             links: Default::default(),
             public_hosts: vec![],
+            hidden: Default::default(),
         },
     )
     .unwrap();
@@ -931,6 +939,7 @@ fn a_command_round_trips_to_tl3d_and_back(
             models: None,
             links: Default::default(),
             public_hosts: vec![],
+            hidden: Default::default(),
         },
     )
     .unwrap();
@@ -1144,4 +1153,186 @@ fn store_refusals_say_why(settings: &tl3_config::Store, console: &tl3_console::R
     owner
         .batch_execute("DELETE FROM tl3_console_commands WHERE id LIKE 'backlog-%'")
         .unwrap();
+}
+
+fn issue_in(repo: &str, number: u64) -> LabelledIssue {
+    LabelledIssue {
+        repo: repo.into(),
+        delivery: format!("hidden-delivery-{repo}-{number}"),
+        ..issue(number)
+    }
+}
+
+/// `hide_repos` (Rob, 2026-11-02): requests of a hidden repository reach the
+/// browser through no route. The board, its stream, the counts, the case file
+/// and the command route all behave as if the repository did not exist. The
+/// store keeps both repositories' requests.
+fn hides_repos_from_every_view(database: &mut Database, assets: &Path) {
+    const HIDDEN: &str = "tl3-sandbox";
+    let settings = database.create("console_hidden");
+    let records = tempfile::tempdir().unwrap();
+    let mut controller = Controller::open(
+        Store::open(&settings).unwrap(),
+        adapters::simulation(records.path()).unwrap(),
+        Bootstrap {
+            repos: vec![
+                Repository {
+                    owner: "RobTand".into(),
+                    name: HIDDEN.into(),
+                    installation: 1,
+                },
+                Repository {
+                    owner: "RobTand".into(),
+                    name: "tl3-console".into(),
+                    installation: 1,
+                },
+            ],
+            ..bootstrap()
+        },
+    )
+    .unwrap();
+    // Nodes 0 and 2 are hidden; 1 and 3 are shown.
+    let first_hidden = 0;
+    let shown = 1;
+    controller.intake(issue_in(HIDDEN, 42)).unwrap();
+    controller.intake(issue_in("tl3-console", 7)).unwrap();
+    let config = tl3_config::Config::parse(include_str!("fixtures/tl3-example.toml")).unwrap();
+    let start = |hidden: HiddenRepos| {
+        tl3_console::start(
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            tl3_console::Options {
+                store: settings.clone(),
+                assets: assets.into(),
+                models: Some(config.models.clone()),
+                links: Default::default(),
+                public_hosts: vec![],
+                hidden,
+            },
+        )
+        .unwrap()
+    };
+    let console =
+        start(HiddenRepos::new(&[format!("RobTand/{HIDDEN}")], &config.github.repos).unwrap());
+    let address = console.address();
+    let board_of = |address| -> Value {
+        let (status, _, body) = get(address, "/api/board");
+        assert_eq!(status, 200);
+        serde_json::from_slice(&body).unwrap()
+    };
+    let issues = |board: &Value| -> Vec<u64> {
+        board["cards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|card| card["issue"].as_u64().unwrap())
+            .collect()
+    };
+    // The store holds both repositories' requests, so the filter is what hides.
+    let stored: i64 = raw(&settings)
+        .query_one(
+            "SELECT count(*) FROM tl3_world WHERE table_name = 'requests'",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(stored, 2);
+
+    // The stream's snapshot, then the board route: no card, no count and no
+    // word of the hidden repository.
+    let mut stream = EventStream::open_with_guard(address, None, Duration::from_secs(30));
+    let snapshot = stream.board_event();
+    assert_eq!(snapshot.name, "snapshot");
+    assert_eq!(issues(&snapshot.data), [7]);
+    assert!(!snapshot.data.to_string().contains(HIDDEN));
+    let board = board_of(address);
+    assert_eq!(issues(&board), [7]);
+    assert_eq!(board["cards"][0]["repo"], "RobTand/tl3-console");
+    assert_eq!(board["flow"]["in_flight"], 1);
+    let counted: u64 = board["flow"]["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|column| column["count"].as_u64().unwrap())
+        .sum();
+    assert_eq!(counted, 1, "column counts cover shown requests only");
+    assert!(!board.to_string().contains(HIDDEN), "{board}");
+
+    // Every patch after more requests arrive.
+    controller.intake(issue_in(HIDDEN, 43)).unwrap();
+    controller.intake(issue_in("tl3-console", 8)).unwrap();
+    loop {
+        let event = stream.board_event();
+        assert_eq!(event.name, "patch");
+        assert!(!event.data.to_string().contains(HIDDEN), "{}", event.data);
+        let upserts = event.data["patch"]["upserts"].as_array().unwrap();
+        if upserts.iter().any(|card| card["issue"] == 8) {
+            assert_eq!(event.data["patch"]["flow"]["in_flight"], 2);
+            break;
+        }
+    }
+
+    // The case file and the command route answer 404 for a hidden request,
+    // as for one that doesn't exist, and file nothing.
+    let open = |address, node: u64| get(address, &format!("/api/requests/{node}")).0;
+    assert_eq!(open(address, first_hidden), 404);
+    assert_eq!(
+        open(address, 2),
+        404,
+        "a request that arrived after startup"
+    );
+    assert_eq!(open(address, shown), 200);
+    let own =
+        format!("X-TL3-Console: 1\r\nOrigin: http://{address}\r\nSec-Fetch-Site: same-origin\r\n");
+    let command = |id: &str| format!(r#"{{"id":"{id}","action":{{"kind":"pause"}}}}"#);
+    let refused = "6d6f6f6e-0000-4000-8000-000000000001";
+    let (status, _) = post(
+        address,
+        &format!("/api/requests/{first_hidden}/commands"),
+        &own,
+        &command(refused),
+    );
+    assert_eq!(status, 404);
+    assert!(
+        !filed(&settings, refused),
+        "nothing filed for a hidden request"
+    );
+    let accepted = "6d6f6f6e-0000-4000-8000-000000000002";
+    let (status, _) = post(
+        address,
+        &format!("/api/requests/{shown}/commands"),
+        &own,
+        &command(accepted),
+    );
+    assert_eq!(status, 202);
+    assert!(filed(&settings, accepted));
+
+    // Commands that reached the store for a hidden request (from an older
+    // console, or tl3d's own tools) never reach the browser either.
+    let mut direct = tl3_store::ConsoleCommands::open(&settings).unwrap();
+    let leaked = "6d6f6f6e-0000-4000-8000-000000000003";
+    let pause = serde_json::json!({"kind": "comment", "text": "secret sandbox words"});
+    assert!(direct.submit(leaked, first_hidden, &pause).unwrap());
+    let seen = "6d6f6f6e-0000-4000-8000-000000000004";
+    assert!(
+        direct
+            .submit(seen, shown, &serde_json::json!({"kind": "pause"}))
+            .unwrap()
+    );
+    loop {
+        let event = stream.event();
+        if event.name != "commands" {
+            continue;
+        }
+        let commands = event.data["commands"].as_array().unwrap();
+        assert!(
+            commands
+                .iter()
+                .all(|command| command["node"] != first_hidden),
+            "{commands:?}"
+        );
+        assert!(!event.data.to_string().contains("secret sandbox words"));
+        if commands.iter().any(|command| command["id"] == seen) {
+            break;
+        }
+    }
 }

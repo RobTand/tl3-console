@@ -9,6 +9,7 @@ pub mod case_file;
 mod commands;
 pub mod config;
 mod feed;
+pub mod hidden;
 mod hosts;
 mod rebuild;
 pub mod schema;
@@ -65,6 +66,8 @@ pub struct Options {
     /// Host names the console answers to besides its listen address, such as a
     /// tunnel's public name.
     pub public_hosts: Vec<String>,
+    /// Repositories whose requests the console never shows.
+    pub hidden: hidden::HiddenRepos,
 }
 
 /// A console serving on its own threads.
@@ -119,7 +122,9 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         models,
         links,
         public_hosts,
+        hidden,
     } = options;
+    let _ = hidden;
     let hosts = hosts::Hosts::new(address, &public_hosts)?;
     let case_files = case_file::CaseFiles {
         store: store.clone(),

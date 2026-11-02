@@ -38,6 +38,9 @@ pub struct File {
     /// public name. A request for any other Host is refused.
     #[serde(default)]
     pub public_hosts: Vec<String>,
+    /// Served repositories (`owner/name`) whose requests the console never shows.
+    #[serde(default)]
+    pub hide_repos: Vec<String>,
 }
 
 /// What the console runs with.
@@ -51,6 +54,8 @@ pub struct Settings {
     pub links: crate::case_file::Links,
     /// Host names the console answers to besides `listen`.
     pub public_hosts: Vec<String>,
+    /// Repositories whose requests the console never shows.
+    pub hidden: crate::hidden::HiddenRepos,
 }
 
 impl Settings {
@@ -78,6 +83,7 @@ impl Settings {
             links: crate::case_file::Links::new(file.traces.as_deref(), &tl3.github.repos)?,
             models: tl3.models,
             public_hosts: file.public_hosts,
+            hidden: crate::hidden::HiddenRepos::new(&file.hide_repos, &tl3.github.repos)?,
         })
     }
 }
@@ -219,6 +225,45 @@ mod tests {
             "public_hosts",
         );
         rejects(&[("public_hosts", "[\"\"]")], "public_hosts");
+    }
+
+    #[test]
+    fn hide_repos_names_served_repositories() {
+        let settings = Settings::parse(&console(&[]), TL3).unwrap();
+        assert!(settings.hidden.is_empty());
+        let settings = Settings::parse(
+            &console(&[("hide_repos", "[\"RobTand/tl3-sandbox\"]")]),
+            TL3,
+        )
+        .unwrap();
+        assert!(settings.hidden.contains("RobTand/tl3-sandbox"));
+        // GitHub ignores case, and so does TL3's own repository identity.
+        assert!(settings.hidden.contains("robtand/TL3-SANDBOX"));
+        assert!(!settings.hidden.contains("RobTand/tl3-console"));
+        assert!(!settings.hidden.contains("RobTand/tl3-sandbox-two"));
+    }
+
+    #[test]
+    fn hide_repos_refuses_a_name_tl3_does_not_serve() {
+        // A typo must not quietly hide nothing; `tl3-console check` fails on it.
+        for entry in [
+            "RobTand/tl3-sandbx",
+            "tl3-sandbox",
+            "OtherOwner/tl3-sandbox",
+            "",
+        ] {
+            let error = Settings::parse(&console(&[("hide_repos", &format!("[{entry:?}]"))]), TL3)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("hide_repos"), "{entry}: {error}");
+            assert!(error.contains(&format!("{entry:?}")), "{entry}: {error}");
+            assert!(error.contains("github.repos"), "{entry}: {error}");
+        }
+        // One good name does not excuse a bad one.
+        rejects(
+            &[("hide_repos", "[\"RobTand/tl3-sandbox\", \"RobTand/oops\"]")],
+            "RobTand/oops",
+        );
     }
 
     #[test]
