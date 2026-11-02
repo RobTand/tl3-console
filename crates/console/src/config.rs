@@ -42,15 +42,103 @@ pub struct Settings {
 impl Settings {
     /// Read both files and check the password file's metadata, never its contents.
     pub fn load(path: impl AsRef<Path>) -> crate::Result<Self> {
-        let _ = path;
-        todo!()
+        let console = read("config", path.as_ref())?;
+        let file = File::parse(&console)?;
+        let settings = Self::parse(&console, &read("tl3_config", &file.tl3_config)?)?;
+        secret_file(&file.password_file)?;
+        Ok(settings)
     }
 
     /// The same, from text, without touching the password file.
     pub fn parse(console: &str, tl3: &str) -> crate::Result<Self> {
-        let _ = (console, tl3);
-        todo!()
+        let file = File::parse(console)?;
+        let tl3 = tl3_config::Config::parse(tl3).map_err(|error| invalid("tl3_config", error))?;
+        Ok(Self {
+            listen: file.listen,
+            assets: file.assets,
+            store: tl3_config::Store {
+                user: file.user,
+                password_file: Some(file.password_file),
+                ..tl3.store
+            },
+            models: tl3.models,
+        })
     }
+}
+
+impl File {
+    fn parse(text: &str) -> crate::Result<Self> {
+        // TOML errors can quote source lines; keep only the message.
+        let file: Self = toml::from_str(text)
+            .map_err(|error: toml::de::Error| invalid("console config", error.message()))?;
+        let ip = file.listen.ip();
+        if file.listen.port() == 0 || ip.is_multicast() || ip.is_unspecified() {
+            return Err(invalid(
+                "listen",
+                "use a unicast listen address with a fixed port from 1 to 65535",
+            ));
+        }
+        for (field, path) in [
+            ("assets", &file.assets),
+            ("password_file", &file.password_file),
+            ("tl3_config", &file.tl3_config),
+        ] {
+            if !path.is_absolute() {
+                return Err(invalid(field, "use an absolute path"));
+            }
+        }
+        // TL3's `tl3-deploy console-role` names this role in GRANT statements.
+        if !file
+            .user
+            .starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
+            || !file
+                .user
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        {
+            return Err(invalid(
+                "user",
+                "use a lowercase Postgres role name: letters, digits and underscores",
+            ));
+        }
+        Ok(file)
+    }
+}
+
+fn invalid(field: &str, message: impl ToString) -> crate::Error {
+    crate::Error::Config(tl3_config::Error::Invalid {
+        field: field.into(),
+        message: message.to_string(),
+    })
+}
+
+fn read(field: &str, path: &Path) -> crate::Result<String> {
+    std::fs::read_to_string(path).map_err(|source| {
+        crate::Error::Config(tl3_config::Error::File {
+            field: field.into(),
+            path: path.into(),
+            source,
+        })
+    })
+}
+
+fn secret_file(path: &Path) -> crate::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let metadata = std::fs::metadata(path).map_err(|source| {
+        crate::Error::Config(tl3_config::Error::File {
+            field: "password_file".into(),
+            path: path.into(),
+            source,
+        })
+    })?;
+    let mode = metadata.permissions().mode();
+    if !metadata.is_file() || mode & 0o077 != 0 || mode & 0o400 == 0 {
+        return Err(invalid(
+            "password_file",
+            "must be a regular owner-only file; run chmod 600 on it",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
