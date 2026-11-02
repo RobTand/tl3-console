@@ -30,6 +30,27 @@ describe("CaseFileView", () => {
     expect(header).toHaveAttribute("rel", "noreferrer");
   });
 
+  it("names the column and ending of cancelled and stopped requests", () => {
+    const { rerender } = render(
+      <CaseFileView
+        now={T0}
+        file={caseFile({ card: card({ id: 1, column: "Cancelled", ending: "Duplicate", phase: "Closed: duplicate" }) })}
+      />,
+    );
+    expect(screen.getByText("Cancelled")).toBeVisible();
+    expect(screen.getByText("Duplicate")).toBeVisible();
+    rerender(
+      <CaseFileView
+        now={T0}
+        file={caseFile({
+          card: card({ id: 1, column: "Backlog", ending: "Stopped", phase: "Closed: stopped", badges: ["Stopped"] }),
+        })}
+      />,
+    );
+    expect(screen.getByText("Backlog")).toBeVisible();
+    expect(screen.getByText("Stopped")).toBeVisible();
+  });
+
   it("counts attempts, rounds, retries, failures and credit", () => {
     render(
       <CaseFileView

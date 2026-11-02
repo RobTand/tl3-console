@@ -19,7 +19,7 @@ use tl3_controller::{
     Bootstrap, Controller, LabelledIssue, Repository, adapters,
     executor::{Completion, Delivery, Executor, Observation, Output, Reconciliation, Upstream},
 };
-use tl3_kernel::{EffectKind, Event, Fact, NodeId, Reply, Role};
+use tl3_kernel::{Command, EffectKind, Event, Fact, NodeId, Reply, Role};
 use tl3_store::Store;
 
 const MERGED: u64 = 0;
@@ -85,6 +85,22 @@ fn main() {
     awaiting_rob(&files);
     println!("test awaiting_rob ... ok");
 
+    // Rob stops the request that waits on him. The issue stays open, so it
+    // waits in the backlog, not in Done.
+    controller
+        .observe(
+            "case-file-stop",
+            Observation::Kernel(Event::Command {
+                node: NodeId(AWAITING_ROB),
+                id: 1,
+                command: Command::Stop,
+            }),
+        )
+        .unwrap();
+    drive(&mut controller, AWAITING_ROB, |n| n.phase.is_closed());
+    stopped_request(&files);
+    println!("test stopped_request ... ok");
+
     assert_eq!(
         mlflow.accept().map(|_| ()).map_err(|error| error.kind()),
         Err(std::io::ErrorKind::WouldBlock),
@@ -97,7 +113,7 @@ fn main() {
     println!("test case_file_on_a_store_ahead_of_the_pin ... ok");
     drop(controller);
     database.stop();
-    println!("6 case file scenarios passed; no skips");
+    println!("7 case file scenarios passed; no skips");
 }
 
 fn repository() -> tl3_config::Repository {
@@ -554,6 +570,24 @@ fn awaiting_rob(files: &Files) {
         ["Can't meet the request", "Can't meet the request"]
     );
     assert_eq!(file["summary"], Value::Null);
+}
+
+fn stopped_request(files: &Files) {
+    let file = case_file(files, AWAITING_ROB);
+    let card = &file["card"];
+    assert_eq!(card["ending"], "Stopped");
+    assert_eq!(card["column"], "Backlog");
+    assert_eq!(card["badges"], json!(["Stopped"]));
+    let columns = strings(&file["timeline"], "column");
+    assert_eq!(
+        columns.last().map(String::as_str),
+        Some("Backlog"),
+        "the closing steps land where the card is: {columns:?}"
+    );
+    assert!(
+        !columns.iter().any(|column| column == "Done"),
+        "a stopped request never passes through Done: {columns:?}"
+    );
 }
 
 fn get(address: SocketAddr, path: &str) -> (u16, Vec<u8>) {

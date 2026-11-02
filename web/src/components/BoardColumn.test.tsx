@@ -33,6 +33,22 @@ describe("BoardColumn", () => {
     expect(screen.getAllByRole("article").map((a) => a.getAttribute("data-card"))).toEqual(["2", "3", "1"]);
   });
 
+  it("lists Cancelled newest first, like Done", () => {
+    render(
+      <BoardColumn
+        column="Cancelled"
+        label="Cancelled"
+        now={1_000}
+        cards={[
+          card({ id: 1, column: "Cancelled", ending: "Duplicate", phase_since_ms: 100 }),
+          card({ id: 2, column: "Cancelled", ending: "NotActionable", phase_since_ms: 300 }),
+          card({ id: 3, column: "Cancelled", ending: "Duplicate", phase_since_ms: 200 }),
+        ]}
+      />,
+    );
+    expect(screen.getAllByRole("article").map((a) => a.getAttribute("data-card"))).toEqual(["2", "3", "1"]);
+  });
+
   it("says when a column is empty", () => {
     render(<BoardColumn column="Backlog" label="Backlog" now={1_000} cards={[]} />);
     const region = screen.getByRole("region", { name: "Backlog" });

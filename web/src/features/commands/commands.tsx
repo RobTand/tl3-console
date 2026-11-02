@@ -98,6 +98,8 @@ export function actionLabel(action: Action): string {
       return `Let TL3 decide on question ${action.question}`;
     case "comment":
       return "Your answer";
+    case "postmortem":
+      return "Postmortem";
   }
 }
 
