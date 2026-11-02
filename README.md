@@ -1,18 +1,20 @@
 # TL3 operator console
 
 The console is the operator's web view of TL3 (PRD RobTand/trustladderiii#327).
-It shows TL3's board live: a Rust service reads TL3's Postgres store through a
-read-only login, follows its change feed with `LISTEN/NOTIFY`, and streams the
-board to a React app over Server-Sent Events.
+It shows TL3's board and case files, request commands and their outcomes,
+and each role's prompt versions. A Rust service reads TL3's Postgres store,
+follows its change feed with `LISTEN/NOTIFY`, and streams changes to a React
+app over Server-Sent Events.
 
-The console only reads. Write paths, such as commands, answers to prompts and
-settings, live in TL3. They reach the console through TL3's schema, and the
-console shows their results like any other change.
+The console files typed request commands and answers for TL3 to apply. It also
+saves prompt versions, activates or reverts them, and acknowledges built-in
+prompt updates. Its database login has grants for these writes. TL3 remains
+the only writer of the world snapshot and event log.
 
-This repository was split out of TL3 at commit
-`43f6506dcd98c1599d9b4dadcfff476bb937332a`, so that console changes and deploys
-no longer share TL3's merge queue or restart `tl3d`. Its history of
-`crates/console` and `web/` comes from TL3.
+This repository was split out of TL3 so that console changes and deploys no
+longer share TL3's merge queue or restart `tl3d`. Its history of
+`crates/console` and `web/` comes from TL3. The current TL3 dependency commit is
+pinned in `Cargo.toml`.
 
 ## Layout
 
