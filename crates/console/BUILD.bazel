@@ -25,6 +25,7 @@ rust_library(
     name = "tl3_console",
     srcs = glob(["src/**/*.rs"], exclude = ["src/bin/**"]),
     aliases = aliases(),
+    compile_data = ["migrations.pin"],
     crate_root = "src/lib.rs",
     edition = "2024",
     deps = _DEPS,
@@ -61,7 +62,7 @@ rust_binary(
 rust_test(
     name = "lib_test",
     size = "small",
-    compile_data = ["tests/fixtures/tl3-example.toml"],
+    compile_data = ["migrations.pin", "tests/fixtures/tl3-example.toml"],
     crate = ":tl3_console",
     data = ["//web:api_types"],
     env = {"TL3_API_TYPES": "$(rootpath //web:api_types)"},
