@@ -91,7 +91,7 @@ pub(crate) struct Published {
 /// schema is older than the pinned TL3 commit's or disagrees with it. Returns
 /// the migration versions the store has beyond the pin, none when it matches.
 pub fn check(store: &tl3_config::Store) -> Result<Vec<i32>> {
-    Ok(Session::open(store)?.extra().to_vec())
+    Ok(Session::open(store, "check")?.extra().to_vec())
 }
 
 /// Serve on an already bound listener. The board, its change feed and the
@@ -203,11 +203,7 @@ impl Builder {
 
     fn read(&mut self, change: Change) -> tl3_controller::Result<Board> {
         if self.reader.is_none() {
-            let session = Session::open(&self.store)?;
-            if !session.extra().is_empty() {
-                eprintln!("console: {}", schema::warning(session.extra()));
-            }
-            self.reader = Some(session);
+            self.reader = Some(Session::open(&self.store, "board")?);
         }
         let session = self.reader.as_mut().expect("an open reader");
         let mut tx = session.transaction()?;

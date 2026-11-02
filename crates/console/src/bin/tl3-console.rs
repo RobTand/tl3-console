@@ -28,10 +28,6 @@ fn run() -> tl3_console::Result<()> {
             println!("Console config loads and the store's schema matches the pinned TL3");
         } else {
             println!("Console config loads and the store's schema is ahead of the pinned TL3");
-            eprintln!(
-                "tl3-console: warning: {}",
-                tl3_console::schema::warning(&extra)
-            );
         }
         return Ok(());
     }

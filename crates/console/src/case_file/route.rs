@@ -2,7 +2,7 @@
 //! drawer refetches it when the stream says the request's card changed.
 
 use super::{CaseFile, Links};
-use crate::sessions::Sessions;
+use crate::{schema::Session, sessions::Sessions};
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -11,14 +11,13 @@ use axum::{
     routing::get,
 };
 use std::sync::Arc;
-use tl3_store::Reader;
 
 #[derive(Clone)]
 pub(crate) struct CaseFiles {
     pub store: tl3_config::Store,
     pub models: Option<Arc<tl3_config::Models>>,
     pub links: Arc<Links>,
-    pub sessions: Arc<Sessions<Reader>>,
+    pub sessions: Arc<Sessions<Session>>,
 }
 
 /// Case files read at once, each on its own read-only session.
@@ -35,7 +34,7 @@ async fn case_file(State(files): State<CaseFiles>, Path(id): Path<u64>) -> Respo
     let sessions = files.sessions.clone();
     let read = sessions
         .run(
-            move || Ok(Reader::open(&store)?),
+            move || Ok(Session::open(&store, "case file")?),
             move |reader| read(reader, &files, id, crate::now_ms()),
         )
         .await;
@@ -58,7 +57,7 @@ async fn case_file(State(files): State<CaseFiles>, Path(id): Path<u64>) -> Respo
 
 /// Case files use their own sessions, so a slow one never holds up the board.
 fn read(
-    reader: &mut Reader,
+    reader: &mut Session,
     files: &CaseFiles,
     id: u64,
     now_ms: i64,

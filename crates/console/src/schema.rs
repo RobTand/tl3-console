@@ -66,12 +66,15 @@ pub(crate) enum Session {
 }
 
 impl Session {
-    pub(crate) fn open(store: &tl3_config::Store) -> tl3_store::Result<Self> {
+    /// The one way the console opens a store session. A store that is ahead
+    /// is logged with `who`, the part of the console that opened it.
+    pub(crate) fn open(store: &tl3_config::Store, who: &str) -> tl3_store::Result<Self> {
         match Reader::open(store) {
             Ok(reader) => Ok(Self::Pinned(reader)),
             Err(tl3_store::Error::SchemaVersion { actual, expected }) if actual > expected => {
                 let mut client = connect(store)?;
                 let extra = Self::check_ahead(&mut client)?;
+                eprintln!("console {who}: {}", warning(&extra));
                 Ok(Self::Ahead { client, extra })
             }
             Err(error) => Err(error),
