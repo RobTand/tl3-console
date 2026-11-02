@@ -7,6 +7,7 @@ test("postmortem command settles on the stream and the list opens the drawer", a
     await page.goto(fixture.url);
     await page.getByRole("link", { name: "Quantize attention layers to FP8 with calibration" }).click();
     const drawer = page.getByRole("dialog");
+    await expect(drawer.getByRole("tab", { name: "Postmortem" })).toBeVisible();
     await drawer.getByRole("tab", { name: "Postmortem" }).click();
     await expect(drawer.getByText("Judge's findings arrive when the postmortem runs")).toBeVisible();
     // This request already owes one for its escalation.
