@@ -2717,6 +2717,7 @@ dependencies = [
  "tl3-kernel",
  "tl3-store",
  "tokio",
+ "toml",
  "tower-http",
  "ts-rs",
 ]

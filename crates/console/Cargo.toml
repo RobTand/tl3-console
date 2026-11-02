@@ -14,6 +14,7 @@ tl3-controller.workspace = true
 tl3-kernel.workspace = true
 tl3-store.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "macros"] }
+toml = "0.8"
 tower-http = { version = "0.6", features = ["fs", "set-header"] }
 ts-rs = { version = "12", features = ["no-serde-warnings"] }
 

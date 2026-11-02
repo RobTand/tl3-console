@@ -6,6 +6,7 @@
 
 pub mod api;
 pub mod case_file;
+pub mod config;
 mod feed;
 mod rebuild;
 mod server;
@@ -37,10 +38,10 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("the console's {0} thread stopped; exiting so the service restarts")]
     Stopped(&'static str),
+    #[error("the store refused the console: {0}")]
+    Store(#[from] tl3_store::Error),
     #[error("{0}")]
     Tl3(#[from] tl3_controller::Error),
-    #[error("{0}")]
-    Store(#[from] tl3_store::Error),
     #[error("stored JSON is not what TL3 writes: {0}")]
     Json(#[from] serde_json::Error),
 }
@@ -83,6 +84,13 @@ pub(crate) struct Published {
     pub board: Option<Arc<Board>>,
     /// The change feed is open and the last build read the store.
     pub connected: bool,
+}
+
+/// Open one read-only session the way the board does. Fails when the store's
+/// schema is not the one the pinned TL3 commit migrates to.
+pub fn check(store: &tl3_config::Store) -> Result<()> {
+    Reader::open(store)?;
+    Ok(())
 }
 
 /// Serve on an already bound listener. The board, its change feed and the

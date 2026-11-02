@@ -190,7 +190,7 @@ impl Links {
             && (!(traces.starts_with("http://") || traces.starts_with("https://"))
                 || traces.chars().any(|c| c.is_whitespace() || c.is_control()))
         {
-            return Err(crate::Error::Invalid("--traces needs an http or https URL"));
+            return Err(crate::Error::Invalid("traces must be an http or https URL"));
         }
         Ok(Links {
             traces: traces.map(str::to_owned),

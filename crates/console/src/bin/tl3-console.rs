@@ -1,4 +1,5 @@
 use std::{io::Write, path::PathBuf, process::ExitCode};
+use tl3_console::config::Settings;
 
 fn main() -> ExitCode {
     match run() {
@@ -10,30 +11,30 @@ fn main() -> ExitCode {
     }
 }
 
+const USAGE: &str = "usage: tl3-console [check] --config FILE";
+
 fn run() -> tl3_console::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (path, traces) = match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
-        ["--config", path] => (PathBuf::from(path), None),
-        ["--config", path, "--traces", traces] => (PathBuf::from(path), Some(traces)),
-        _ => {
-            return Err(tl3_console::Error::Invalid(
-                "usage: tl3-console --config FILE [--traces URL]",
-            ));
-        }
+    let (check, path) = match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+        ["--config", path] => (false, PathBuf::from(path)),
+        ["check", "--config", path] => (true, PathBuf::from(path)),
+        _ => return Err(tl3_console::Error::Invalid(USAGE)),
     };
-    let config = tl3_config::Config::load_console(path)?;
-    config.validate()?;
-    let console = config.console.ok_or(tl3_console::Error::Invalid(
-        "the config has no [console] section",
-    ))?;
-    let listener = std::net::TcpListener::bind(console.listen)?;
+    let settings = Settings::load(path)?;
+    if check {
+        // Deploy runs this with the new binary before it replaces the old one.
+        tl3_console::check(&settings.store)?;
+        println!("Console config loads and the store's schema matches the pinned TL3");
+        return Ok(());
+    }
+    let listener = std::net::TcpListener::bind(settings.listen)?;
     let running = tl3_console::start(
         listener,
         tl3_console::Options {
-            store: console.store(&config.store),
-            assets: console.assets,
-            links: tl3_console::case_file::Links::new(traces, &config.github.repos)?,
-            models: Some(config.models),
+            store: settings.store,
+            assets: settings.assets,
+            models: Some(settings.models),
+            links: settings.links,
         },
     )?;
     println!("Console listening on http://{}", running.address());
