@@ -103,6 +103,7 @@ async fn events(
         shown: None,
         shown_id: String::new(),
         shown_commands: None,
+        shown_postmortems: None,
         connected: None,
         queue: VecDeque::new(),
         retry_sent: false,
@@ -120,6 +121,7 @@ struct Client {
     shown_id: String,
     shown_commands: Option<Arc<Vec<CommandRecord>>>,
     connected: Option<bool>,
+    shown_postmortems: Option<u64>,
     queue: VecDeque<Event>,
     retry_sent: bool,
 }
@@ -173,6 +175,11 @@ impl Client {
                     },
                 ));
                 self.shown_commands = Some(commands);
+            }
+            if self.shown_postmortems != Some(current.postmortems) {
+                self.shown_postmortems = Some(current.postmortems);
+                self.queue
+                    .push_back(json(Event::default().event("postmortems"), &true));
             }
             if self.queue.is_empty() && self.published.changed().await.is_err() {
                 return None;

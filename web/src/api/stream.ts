@@ -9,6 +9,7 @@ export interface StreamHandlers {
   state(state: StreamState): void;
   /** The newest console commands and how each settled. */
   commands?(event: CommandsEvent): void;
+  postmortems?(): void;
 }
 
 /** The parts of EventSource the stream uses. */
@@ -113,6 +114,7 @@ export class BoardStream {
       this.shown = event.lastEventId;
       this.handlers.patch(patch);
     });
+    source.addEventListener("postmortems", () => this.handlers.postmortems?.());
     source.addEventListener("commands", (event) => {
       this.handlers.commands?.(JSON.parse(event.data) as CommandsEvent);
     });

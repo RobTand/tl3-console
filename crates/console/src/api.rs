@@ -5,6 +5,10 @@ use crate::case_file::{
     BlockedReport, CaseFile, CaseIncident, ChildItem, ClosingSummary, IncidentCause, Link,
     LinkKind, PendingQuestion, RunStatus, StageChange, WorkerRun,
 };
+use crate::postmortems::{
+    CodeGrade, Postmortem, PostmortemCause, PostmortemPage, PostmortemReason, PostmortemStatus,
+    Recommendation, RequestPostmortems,
+};
 use serde::{Deserialize, Serialize};
 use tl3_controller::{
     board::{
@@ -121,6 +125,17 @@ pub fn typescript() -> String {
         "// Generated from the console's Rust types by crates/console/src/api.rs. Do not edit.\n",
     );
     for (docs, decl) in [
+        (Postmortem::docs(), Postmortem::decl(&config)),
+        (PostmortemPage::docs(), PostmortemPage::decl(&config)),
+        (
+            RequestPostmortems::docs(),
+            RequestPostmortems::decl(&config),
+        ),
+        (CodeGrade::docs(), CodeGrade::decl(&config)),
+        (Recommendation::docs(), Recommendation::decl(&config)),
+        (PostmortemStatus::docs(), PostmortemStatus::decl(&config)),
+        (PostmortemReason::docs(), PostmortemReason::decl(&config)),
+        (PostmortemCause::docs(), PostmortemCause::decl(&config)),
         (Board::docs(), Board::decl(&config)),
         (BoardPatch::docs(), BoardPatch::decl(&config)),
         (Card::docs(), Card::decl(&config)),

@@ -181,6 +181,34 @@ it installs. Incidents that name no repository, such as a failed read of the
 operations repository, still show. Add the line to the config by hand and
 restart the console.
 
+## Postmortems
+
+The Postmortems page searches findings and recommendation evidence across
+requests. Filter by repository, cause, selection reason, status and owed date.
+Dates are inclusive UTC dates. Rows open the request's Postmortem drawer tab.
+The tab shows every trigger, the recorded code grades and facts, and the judge's
+findings when available. Recommendation counts include distinct visible
+postmortems with the same fingerprint, across all pages.
+
+Closed requests and requests in Needs Rob offer **Write postmortem** in the
+drawer. Needs Rob cards offer it too. Confirm once to file the existing typed
+console command. The stream reports whether TL3 applied or refused it, with
+TL3's own reason. An owed or running postmortem disables the button.
+
+Read-only API routes:
+
+- `GET /api/postmortems`: filters `q`, `repo`, `cause`, `reason`, `status`,
+  `from`, `to`, `limit` and `before`.
+- `GET /api/requests/{id}/postmortems`: postmortems and code grades for a request. `before` and `grade_before` page
+  each history independently.
+
+Pages default to 50 postmortems, accept at most 100 and return `next_before`.
+Request reads return at most 100 grades with `next_grade_before`. Queries use
+migration 13's indexes and a three-second statement limit, on at most four
+read-only sessions. Hidden repositories are excluded from reads and counts.
+The `postmortems` stream event invalidates open queries whenever postmortems,
+recommendations or grades change, and on reconnect. There is no refresh timer.
+
 ## Host names
 
 A web page on another site can point its own host name at the console's

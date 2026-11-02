@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, render as testingRender, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import type { Action, CardQuestion, CommandRecord } from "../../api/types.gen";
@@ -7,6 +8,11 @@ import { commandId, fileCommand } from "./api";
 import { CardCommands } from "./CardCommands";
 import { CommandsProvider } from "./commands";
 import { DeferAll } from "./DeferAll";
+
+function render(children: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return testingRender(children, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> });
+}
 
 type Filed = { node: number; id: string; action: Action };
 
@@ -101,7 +107,7 @@ describe("CardCommands", () => {
     setup(<CardCommands card={card({ id: 4 })} />, [
       record("postmortem", 4, { kind: "postmortem" }, "pending"),
     ]);
-    expect(screen.getByText("Postmortem: pending")).toBeVisible();
+    expect(screen.getByText("Write postmortem: pending")).toBeVisible();
   });
 
   it("confirms a pause in one step, then shows it sending, pending and applied", async () => {
@@ -131,14 +137,14 @@ describe("CardCommands", () => {
     expect(screen.getByText("Resume refused: The request isn't paused.")).toBeVisible();
   });
 
-  it("offers only restart on a stopped request", () => {
+  it("offers restart and postmortem on a stopped backlog request", () => {
     setup(<CardCommands card={card({ id: 4, column: "Backlog", ending: "Stopped", badges: ["Stopped"] })} />);
-    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Restart"]);
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Restart", "Write postmortem"]);
   });
 
-  it("offers nothing on a merged request", () => {
+  it("offers a postmortem on a merged request", () => {
     setup(<CardCommands card={card({ id: 5, column: "Done", ending: "Merged" })} />);
-    expect(screen.queryAllByRole("button")).toEqual([]);
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Write postmortem"]);
   });
 
   it("clears an incident", async () => {
