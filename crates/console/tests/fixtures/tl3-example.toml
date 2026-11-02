@@ -1,4 +1,4 @@
-# Copied from RobTand/trustladderiii crates/config/example.toml at 43f6506d.
+# Copied from RobTand/trustladderiii crates/config/example.toml at 10cb873b.
 # Slice-one config. Paths are absolute; neither ~ nor environment variables expand.
 # Deployment placeholders parse offline. Replace them before Config::load.
 # docs/state-table.md, "Stopping": worktree lifecycle. Deployment starting path.
@@ -150,7 +150,7 @@ runs = "/srv/tl3/worker-runs"
 command = ["-m", "tl3_workers", "run"]
 
 [planning]
-protected_paths = [".github/**", ".mergify.yml", ".mergify.yaml", "**/conftest.py", "pytest.ini", "tox.ini", "noxfile.py", "setup.cfg", "pyproject.toml"]
+protected_paths = [".github/**", ".mergify.yml", ".mergify.yaml", "**/conftest.py", "pytest.ini", ".pytest.ini", "tox.ini", "noxfile.py", "setup.cfg", "pyproject.toml"]
 
 # Calibration seam for future MLflow measurements. Code sums these estimates.
 [planning.overhead_tokens]
