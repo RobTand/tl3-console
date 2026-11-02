@@ -1,3 +1,4 @@
+// Copied from RobTand/trustladderiii crates/store/tests/support/scratch.rs at 414071afb9f446d8ed7de4cc88bbb82b5c9cd199.
 use rustix::{
     io::Errno,
     process::{Pid, geteuid, test_kill_process},

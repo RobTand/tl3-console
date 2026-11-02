@@ -170,25 +170,19 @@ impl Session {
             }
             if slot.is_none() {
                 // The console's migration check, as every store session has.
-                crate::schema::Session::open(&session.settings, "prompts")?;
-                *slot = Some(Prompts::open(&session.settings)?);
+                crate::schema::Session::open(&session.settings, "prompts")
+                    .map_err(Failure::store)?;
+                *slot = Some(Prompts::open(&session.settings).map_err(Failure::store)?);
             }
-            let result = work(slot.as_mut().expect("an open session"));
-            if result.is_err() {
+            let result = work(slot.as_mut().expect("an open session")).map_err(Failure::store);
+            if matches!(&result, Err(Failure::Unavailable)) {
                 *slot = None;
             }
             result
         })
         .await;
         match done {
-            Ok(Ok(value)) => Ok(value),
-            Ok(Err(error)) => {
-                eprintln!(
-                    "console prompt store unavailable: {}",
-                    crate::describe(&error)
-                );
-                Err(Failure::Unavailable)
-            }
+            Ok(result) => result,
             Err(_) => Err(Failure::Panicked),
         }
     }
@@ -220,8 +214,34 @@ fn same_origin(headers: &HeaderMap) -> Result<(), Failure> {
 /// Why a request got no answer from the prompt store.
 enum Failure {
     Forbidden,
+    Permission,
+    InvalidText(String),
+    Store,
     Unavailable,
     Panicked,
+}
+
+impl Failure {
+    fn store(error: tl3_store::Error) -> Self {
+        eprintln!("console prompt store: {}", crate::describe(&error));
+        match error {
+            tl3_store::Error::Database(error) => match error.as_db_error() {
+                Some(error) => match error.code().code() {
+                    "42501" => Self::Permission,
+                    code if code.starts_with("22") => Self::InvalidText(error.message().into()),
+                    code if code.starts_with("08")
+                        || matches!(code, "57P01" | "57P02" | "57P03") =>
+                    {
+                        Self::Unavailable
+                    }
+                    _ => Self::Store,
+                },
+                None => Self::Unavailable,
+            },
+            tl3_store::Error::Password(_) => Self::Unavailable,
+            _ => Self::Store,
+        }
+    }
 }
 
 impl IntoResponse for Failure {
@@ -230,6 +250,15 @@ impl IntoResponse for Failure {
             Failure::Forbidden => text(
                 StatusCode::FORBIDDEN,
                 "Writes come only from the console's own page.",
+            ),
+            Failure::Permission => text(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "The console's database login can't edit prompts; TL3's deploy grants it (tl3-deploy console-role)",
+            ),
+            Failure::InvalidText(reason) => text(StatusCode::UNPROCESSABLE_ENTITY, &reason),
+            Failure::Store => text(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "The prompt store could not complete this request.",
             ),
             Failure::Unavailable => text(
                 StatusCode::SERVICE_UNAVAILABLE,
