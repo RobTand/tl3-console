@@ -64,6 +64,8 @@ const DEFERRABLE: u64 = 43;
 /// that already exists, which is done.
 const DUPLICATE: u64 = 44;
 const ALREADY_DONE: u64 = 45;
+/// A request Rob stops while the reader still works on it.
+const STOPPED: u64 = 46;
 
 /// The simulated workers, with scripted replies for two seeded requests.
 struct Workers {
@@ -242,6 +244,27 @@ fn main() {
             && controller.drive_once().unwrap()
         {}
     }
+    controller
+        .intake(issue(
+            "tl3-sandbox",
+            STOPPED,
+            "Rename the kernel cache index",
+        ))
+        .unwrap();
+    let stopped = controller.world().unwrap().nodes.len() as u64 - 1;
+    controller
+        .observe(
+            "fixture-stopped",
+            Observation::Kernel(Event::Command {
+                node: NodeId(stopped),
+                id: 1,
+                command: Command::Stop,
+            }),
+        )
+        .unwrap();
+    while column(&settings, "tl3-sandbox", STOPPED) != Column::Backlog
+        && controller.drive_once().unwrap()
+    {}
     controller
         .intake(issue(
             "tl3-sandbox",

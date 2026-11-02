@@ -31,9 +31,8 @@ test("a stopped request waits in the backlog, and cancelled work is not done", a
     await page.goto(fixture.url);
     const card = (region: string, issue: number) =>
       page.getByRole("region", { name: region }).getByRole("article", { name: new RegExp(`tl3-sandbox#${issue}:`) });
-    // The merge-queue request was stopped; its issue stays open, so Rob can restart it.
-    await expect(page.getByRole("region", { name: "Backlog" })).toContainText("batching rules");
-    const stopped = page.getByRole("region", { name: "Backlog" }).getByRole("article", { name: /tl3-sandbox#104:/ });
+    // Rob stopped this request; its issue stays open, so he can restart it.
+    const stopped = card("Backlog", 46);
     await expect(stopped.getByRole("list", { name: "Badges" })).toHaveText("Stopped");
     await stopped.getByRole("button", { name: "Actions" }).click();
     await expect(page.getByRole("menuitem", { name: "Restart" })).toBeVisible();
@@ -41,7 +40,7 @@ test("a stopped request waits in the backlog, and cancelled work is not done", a
     // A duplicate is cancelled. Work that already exists is done.
     await expect(card("Cancelled", 44).getByText("Duplicate", { exact: true })).toBeVisible();
     await expect(card("Done", 45).getByText("Already done", { exact: true })).toBeVisible();
-    await expect(page.getByRole("region", { name: "Done" }).getByRole("article", { name: /#104:/ })).toHaveCount(0);
+    await expect(card("Done", 46)).toHaveCount(0);
   } finally {
     await fixture.stop();
   }
