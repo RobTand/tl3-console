@@ -1,0 +1,191 @@
+name: Gate
+
+# The same shape as TL3's Gate. Bazel runs on BuildBuddy: the client on a
+# Remote Bazel runner, every action on remote execution. This workflow keeps
+# only what needs GitHub context: the queue-aware refs, Mergify scopes and the
+# two required checks, Rust and Web. See README.md.
+
+on:
+  # Not on labeled: adding "queue" (and Mergify's own "queued") would rerun the
+  # gate and cancel the run in progress, leaving Rust and Web cancelled on the
+  # head, which dequeues the pull request it was meant to queue.
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_BUILD_JOBS: '4'
+  OMP_NUM_THREADS: '1'
+  RAYON_NUM_THREADS: '1'
+  TOKIO_WORKER_THREADS: '1'
+
+jobs:
+  bazel:
+    name: Bazel
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    outputs:
+      rust: ${{ steps.gate.outputs.rust }}
+      web: ${{ steps.gate.outputs.web }}
+      scopes_uploaded: ${{ steps.uploaded.outputs.scopes_uploaded }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: refs
+        name: Queue-aware base and head
+        uses: Mergifyio/gha-mergify-ci@392d123d84a27960993927aec1f2cbb059fb95c1 # v27
+        with:
+          action: scopes-git-refs
+      - id: gate
+        name: Select and test on BuildBuddy
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+          BASE: ${{ steps.refs.outputs.base }}
+          HEAD: ${{ steps.refs.outputs.head }}
+          BRANCH: ${{ github.head_ref }}
+        run: python3 tools/ci/remote_gate.py pr --base "$BASE" --head "$HEAD" --branch "$BRANCH"
+      - id: token
+        name: Require the Mergify token
+        if: always() && steps.gate.outputs.scopes_ready == 'true'
+        env:
+          MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
+        # gha-mergify-ci skips scopes-upload and only warns when its token is empty.
+        run: |
+          if ! test -n "$MERGIFY_TOKEN"; then
+            echo "::error::MERGIFY_TOKEN is empty; scopes cannot reach Mergify."
+            exit 1
+          fi
+      - id: upload
+        name: Upload scopes
+        if: always() && steps.token.outcome == 'success'
+        uses: Mergifyio/gha-mergify-ci@392d123d84a27960993927aec1f2cbb059fb95c1 # v27
+        with:
+          action: scopes-upload
+          token: ${{ secrets.MERGIFY_TOKEN }}
+          scopes: ${{ steps.gate.outputs.scopes }}
+          all_scopes: ${{ steps.gate.outputs.all_scopes }}
+      - id: uploaded
+        if: always()
+        env:
+          OUTCOME: ${{ steps.upload.outcome }}
+        run: |
+          if [ "$OUTCOME" != success ]; then
+            echo "::error::No scope list reached Mergify; the gate cannot pass."
+            exit 1
+          fi
+          echo scopes_uploaded=true >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: bazel-gate
+          path: gate-output/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  rust-lint:
+    name: Rust format and lint
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+          rustup default 1.99.1
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: v1-rust-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: hosted-${{ runner.arch }}
+      - run: cargo fmt --all -- --check
+      # --locked also fails a Cargo.lock that no longer matches Cargo.toml's TL3 pin.
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  rust:
+    name: Rust
+    needs: [bazel, rust-lint]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Require Bazel's Rust verdict, scopes and lint
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 tools/ci/remote_gate.py aggregate rust
+
+  web:
+    name: Web
+    needs: [bazel]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Require Bazel's Web verdict and scopes
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 tools/ci/remote_gate.py aggregate web
+
+  post-merge:
+    name: Post-merge full run
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: prs
+        name: Merged pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -o pipefail
+          prs=$(git rev-list "$BEFORE..$AFTER" | while read -r sha; do
+            gh api "repos/${GITHUB_REPOSITORY}/commits/$sha/pulls" --jq '.[].number'
+          done | sort -nu | paste -sd, -)
+          echo "prs=$prs" >> "$GITHUB_OUTPUT"
+      - name: Test everything
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          PRS: ${{ steps.prs.outputs.prs }}
+        run: >-
+          python3 tools/ci/remote_gate.py main --base "$BEFORE" --head "$AFTER"
+          --branch main --prs "$PRS" --timeout 75
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: post-merge-${{ github.sha }}
+          path: gate-output/
+          retention-days: 90
+          if-no-files-found: ignore

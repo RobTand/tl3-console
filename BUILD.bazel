@@ -1,0 +1,24 @@
+exports_files([
+    "Cargo.lock",
+    "Cargo.toml",
+    "MODULE.bazel",
+])
+
+filegroup(
+    name = "workflows",
+    srcs = glob([".github/workflows/**"]),
+    visibility = ["//visibility:public"],
+)
+
+# Read by the gate's own tests in tools/ci.
+filegroup(
+    name = "bazel_config",
+    srcs = [
+        ".bazelrc",
+        ".bazelversion",
+        ".mergify.yml",
+        "BUILD.bazel",
+        "MODULE.bazel",
+    ],
+    visibility = ["//visibility:public"],
+)

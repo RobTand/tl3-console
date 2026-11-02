@@ -98,11 +98,18 @@ pub fn typescript() -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fs, path::Path};
+    use std::{
+        env, fs,
+        path::{Path, PathBuf},
+    };
 
     #[test]
     fn web_api_types_are_current() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/api/types.gen.ts");
+        // Bazel names the file as a runfile; Cargo finds it beside the crate.
+        let path = env::var_os("TL3_API_TYPES").map_or_else(
+            || Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/api/types.gen.ts"),
+            PathBuf::from,
+        );
         let generated = super::typescript();
         if env::var_os("TL3_WRITE_API_TYPES").is_some() {
             fs::write(&path, &generated).unwrap();
