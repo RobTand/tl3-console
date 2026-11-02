@@ -1,0 +1,160 @@
+//! The console's own config file, apart from TL3's `tl3.toml`.
+//!
+//! ```toml
+//! listen = "192.168.1.107:8034"
+//! assets = "/home/rob/.local/share/tl3-console/assets"
+//! user = "tl3_console"
+//! password_file = "/home/rob/.config/tl3/secrets/console-postgres-password"
+//! tl3_config = "/home/rob/.config/tl3/tl3.toml"
+//! ```
+//!
+//! The console reads `tl3.toml` with the pinned TL3's own parser, and keeps
+//! only its store settings and model ladders. It connects as its own login.
+
+use serde::Deserialize;
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+};
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct File {
+    pub listen: SocketAddr,
+    /// The built web app. Deploy builds and installs it.
+    pub assets: PathBuf,
+    /// The read-only Postgres login TL3's `tl3-deploy console-role` grants.
+    pub user: String,
+    pub password_file: PathBuf,
+    /// TL3's config, read for `[store]` and `[models]` only.
+    pub tl3_config: PathBuf,
+}
+
+/// What the console runs with.
+#[derive(Clone, Debug)]
+pub struct Settings {
+    pub listen: SocketAddr,
+    pub assets: PathBuf,
+    pub store: tl3_config::Store,
+    pub models: tl3_config::Models,
+}
+
+impl Settings {
+    /// Read both files and check the password file's metadata, never its contents.
+    pub fn load(path: impl AsRef<Path>) -> crate::Result<Self> {
+        let _ = path;
+        todo!()
+    }
+
+    /// The same, from text, without touching the password file.
+    pub fn parse(console: &str, tl3: &str) -> crate::Result<Self> {
+        let _ = (console, tl3);
+        todo!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Settings;
+    use std::{fs, os::unix::fs::PermissionsExt};
+
+    const TL3: &str = include_str!("../tests/fixtures/tl3-example.toml");
+
+    fn console(fields: &[(&str, &str)]) -> String {
+        let mut values = vec![
+            ("listen", "\"192.168.1.107:8034\""),
+            ("assets", "\"/srv/tl3-console/assets\""),
+            ("user", "\"tl3_console\""),
+            ("password_file", "\"/run/tl3-console/password\""),
+            ("tl3_config", "\"/etc/tl3/tl3.toml\""),
+        ];
+        for (key, value) in fields {
+            values.retain(|(name, _)| name != key);
+            if !value.is_empty() {
+                values.push((key, value));
+            }
+        }
+        values
+            .iter()
+            .map(|(key, value)| format!("{key} = {value}\n"))
+            .collect()
+    }
+
+    fn rejects(fields: &[(&str, &str)], named: &str) {
+        let error = Settings::parse(&console(fields), TL3)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(named), "{fields:?}: {error}");
+    }
+
+    #[test]
+    fn connects_to_tl3s_store_as_its_own_login() {
+        let settings = Settings::parse(&console(&[]), TL3).unwrap();
+        let tl3 = tl3_config::Config::parse(TL3).unwrap();
+        assert_eq!(settings.listen, "192.168.1.107:8034".parse().unwrap());
+        assert_eq!(
+            settings.assets,
+            std::path::Path::new("/srv/tl3-console/assets")
+        );
+        assert_eq!(settings.store.user, "tl3_console");
+        assert_eq!(
+            settings.store.password_file.as_deref(),
+            Some(std::path::Path::new("/run/tl3-console/password"))
+        );
+        assert_eq!(
+            (
+                settings.store.host,
+                settings.store.port,
+                settings.store.database
+            ),
+            (tl3.store.host, tl3.store.port, tl3.store.database)
+        );
+        assert_eq!(settings.models.maker[0].name, tl3.models.maker[0].name);
+    }
+
+    #[test]
+    fn refuses_unknown_fields_and_unsafe_values() {
+        rejects(&[("port", "8034")], "port");
+        rejects(&[("listen", "\"0.0.0.0:8034\"")], "listen");
+        rejects(&[("listen", "\"127.0.0.1:0\"")], "listen");
+        rejects(&[("assets", "\"assets\"")], "assets");
+        rejects(&[("password_file", "\"password\"")], "password_file");
+        rejects(&[("tl3_config", "\"tl3.toml\"")], "tl3_config");
+        rejects(&[("user", "\"tl3 console\"")], "user");
+        rejects(&[("user", "")], "user");
+    }
+
+    #[test]
+    fn refuses_a_tl3_config_its_tl3_cannot_parse() {
+        let error = Settings::parse(&console(&[]), "[store]\nport = \"x\"\n")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("tl3_config"), "{error}");
+    }
+
+    #[test]
+    fn load_checks_the_password_file_without_reading_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let tl3 = directory.path().join("tl3.toml");
+        fs::write(&tl3, TL3).unwrap();
+        let password = directory.path().join("password");
+        fs::write(&password, "secret\n").unwrap();
+        let path = directory.path().join("console.toml");
+        let text = console(&[
+            (
+                "password_file",
+                &format!("{:?}", password.display().to_string()),
+            ),
+            ("tl3_config", &format!("{:?}", tl3.display().to_string())),
+        ]);
+        fs::write(&path, text).unwrap();
+        fs::set_permissions(&password, fs::Permissions::from_mode(0o640)).unwrap();
+        let error = Settings::load(&path).unwrap_err().to_string();
+        assert!(error.contains("password_file"), "{error}");
+        fs::set_permissions(&password, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            Settings::load(&path).unwrap().store.password_file,
+            Some(password)
+        );
+    }
+}
