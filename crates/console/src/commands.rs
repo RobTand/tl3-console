@@ -166,17 +166,27 @@ async fn file(
     let filed = tokio::task::spawn_blocking(move || filer.submit(&request.id, node, &action)).await;
     match filed {
         Ok(Ok(filed)) => (StatusCode::ACCEPTED, Json(Filed { id, filed })).into_response(),
-        Ok(Err(error)) => {
-            let _ = sqlstate(&error);
-            eprintln!(
-                "console command {id} not filed: {}",
-                crate::describe(&error)
-            );
-            refused(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "The console couldn't reach the store; try again.",
-            )
-        }
+        Ok(Err(error)) => match sqlstate(&error) {
+            // tl3_console_command's own caps (TL3 migration 11).
+            Some("22001") => refused(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "This command is over 64 KiB once stored; shorten your words.",
+            ),
+            Some("53400") => refused(
+                StatusCode::TOO_MANY_REQUESTS,
+                "1,000 commands are waiting for TL3 to apply them; try again once it catches up.",
+            ),
+            _ => {
+                eprintln!(
+                    "console command {id} not filed: {}",
+                    crate::describe(&error)
+                );
+                refused(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "The console couldn't reach the store; try again.",
+                )
+            }
+        },
         Err(_) => refused(
             StatusCode::SERVICE_UNAVAILABLE,
             "The console couldn't file this command; try again.",
