@@ -37,7 +37,7 @@ function Chip(props: { tone: string; title: string; children: string }) {
   );
 }
 
-export function BoardCard({ card, now }: { card: Card; now: number }) {
+export function BoardCard({ card, now }: { card: Card; now: number; onOpen?: (id: number) => void }) {
   const [owner, name] = card.repo.split("/");
   const retries =
     card.retries.plan + card.retries.audit + card.retries.run_failures + card.retries.effect_failures;

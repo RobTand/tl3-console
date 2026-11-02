@@ -11,6 +11,7 @@ serde_json = "1"
 thiserror = "2"
 tl3-config.workspace = true
 tl3-controller.workspace = true
+tl3-kernel.workspace = true
 tl3-store.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "macros"] }
 tower-http = { version = "0.6", features = ["fs", "set-header"] }
@@ -22,10 +23,14 @@ postgresql_embedded = { version = "0.22", default-features = false, features = [
 rustix = { version = "1", features = ["process"] }
 serde_json = "1"
 tempfile = "3"
-tl3-kernel.workspace = true
 tokio = { version = "1", features = ["rt", "time", "net"] }
 
 [[test]]
 name = "console"
 path = "tests/console.rs"
+harness = false
+
+[[test]]
+name = "case_file"
+path = "tests/case_file.rs"
 harness = false

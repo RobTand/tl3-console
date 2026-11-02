@@ -108,6 +108,7 @@ fn main() {
                     .unwrap()
                     .models,
             ),
+            links: Default::default(),
         },
     )
     .unwrap();

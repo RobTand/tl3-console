@@ -5,6 +5,7 @@
 #![forbid(unsafe_code)]
 
 pub mod api;
+pub mod case_file;
 mod feed;
 mod rebuild;
 mod server;
@@ -35,6 +36,12 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("the console's {0} thread stopped; exiting so the service restarts")]
     Stopped(&'static str),
+    #[error("{0}")]
+    Tl3(#[from] tl3_controller::Error),
+    #[error("{0}")]
+    Store(#[from] tl3_store::Error),
+    #[error("stored JSON is not what TL3 writes: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -45,6 +52,8 @@ pub struct Options {
     pub assets: PathBuf,
     /// Model ladders, to name each card's model.
     pub models: Option<tl3_config::Models>,
+    /// Where the case file's links point.
+    pub links: case_file::Links,
 }
 
 /// A console serving on its own threads.
@@ -88,7 +97,13 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         store,
         assets,
         models,
+        links,
     } = options;
+    let case_files = case_file::CaseFiles {
+        store: store.clone(),
+        models: models.clone().map(Arc::new),
+        links: Arc::new(links),
+    };
     {
         let (store, rebuilds, connected) = (store.clone(), rebuilds.clone(), connected.clone());
         supervisor.spawn("feed", move || feed::run(store, rebuilds, connected))?;
@@ -136,7 +151,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         .thread_name("tl3-console-http")
         .enable_all()
         .build()?;
-    let app = server::router(published, &assets);
+    let app = server::router(published, &assets, case_file::routes(case_files));
     supervisor.spawn("http", move || {
         let served = runtime.block_on(async move {
             let listener = tokio::net::TcpListener::from_std(listener)?;

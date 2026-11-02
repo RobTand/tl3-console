@@ -11,12 +11,13 @@ fn main() -> ExitCode {
 }
 
 fn run() -> tl3_console::Result<()> {
-    let mut args = std::env::args().skip(1);
-    let path = match (args.next().as_deref(), args.next(), args.next()) {
-        (Some("--config"), Some(path), None) => PathBuf::from(path),
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let (path, traces) = match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+        ["--config", path] => (PathBuf::from(path), None),
+        ["--config", path, "--traces", traces] => (PathBuf::from(path), Some(traces)),
         _ => {
             return Err(tl3_console::Error::Invalid(
-                "usage: tl3-console --config FILE",
+                "usage: tl3-console --config FILE [--traces MLFLOW_TRACES_URL]",
             ));
         }
     };
@@ -31,6 +32,7 @@ fn run() -> tl3_console::Result<()> {
         tl3_console::Options {
             store: console.store(&config.store),
             assets: console.assets,
+            links: tl3_console::case_file::Links::new(traces, &config.github.repos)?,
             models: Some(config.models),
         },
     )?;
