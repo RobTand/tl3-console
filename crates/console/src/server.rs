@@ -56,7 +56,8 @@ pub(crate) fn router(
         ))
 }
 
-/// The largest request body any route reads.
+/// The body limit for routes that set none of their own. The commands route
+/// sets a larger one, sized for Rob's words (`commands::MAX_BODY_BYTES`).
 pub(crate) const BODY_LIMIT: usize = 64 * 1024;
 
 /// What every route sits behind, added last so it covers the routes merged in

@@ -213,6 +213,7 @@ export function QuestionPanel({ card, question }: { card: Card; question: CardQu
   const [returnTo, setReturnTo] = useState<string | null>(null);
   const optionButtons = useRef(new Map<string, HTMLButtonElement>());
   const [words, setWords] = useState("");
+  const answerBox = useRef<HTMLTextAreaElement>(null);
   const recommended = question.options[question.recommended];
   // Closing an option's form returns focus to the option that opened it.
   useEffect(() => {
@@ -288,9 +289,12 @@ export function QuestionPanel({ card, question }: { card: Card; question: CardQu
             if (words.trim() === "") return;
             run(card.id, { kind: "comment", text: words });
             setWords("");
+            // Clearing the box disables its button, which would drop focus to the page.
+            answerBox.current?.focus();
           }}
         >
           <textarea
+            ref={answerBox}
             aria-label="Your answer"
             rows={3}
             value={words}
