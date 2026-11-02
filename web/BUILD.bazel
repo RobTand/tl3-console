@@ -1,0 +1,91 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+package(default_visibility = ["//visibility:public"])
+
+# The Rust lib test compares this with the API types it generates.
+filegroup(
+    name = "api_types",
+    srcs = ["src/api/types.gen.ts"],
+)
+
+filegroup(
+    name = "sources",
+    srcs = glob(
+        ["**"],
+        exclude = [
+            "BUILD.bazel",
+            "dist/**",
+            "evidence/**",
+            "node_modules/**",
+            "playwright-report/**",
+            "test-results/**",
+        ],
+    ),
+)
+
+_NODE = select({
+    "@platforms//cpu:aarch64": ["@nodejs_linux_arm64//:bin/node", "@nodejs_linux_arm64//:all"],
+    "//conditions:default": ["@nodejs_linux_amd64//:bin/node", "@nodejs_linux_amd64//:all"],
+})
+
+_NODE_ENV = select({
+    "@platforms//cpu:aarch64": {"NODE": "$(rootpath @nodejs_linux_arm64//:bin/node)"},
+    "//conditions:default": {"NODE": "$(rootpath @nodejs_linux_amd64//:bin/node)"},
+})
+
+# `npm ci` reads the npm registry, so these tests get the network back
+# (tools/bazel/nonhermetic.bzl's convention in TL3). package-lock.json stays
+# the only lockfile: deploy and development use npm too.
+_NETWORK = {"dockerNetwork": "bridge"}
+
+[
+    sh_test(
+        name = step,
+        size = "medium",
+        srcs = ["//tools/bazel:npm_test.sh"],
+        args = [step],
+        data = [":sources"] + _NODE,
+        env = _NODE_ENV,
+        exec_properties = _NETWORK,
+        tags = [
+            "requires-network",
+            "web",
+        ],
+    )
+    for step in [
+        "typecheck",
+        "unit",
+        "build",
+    ]
+]
+
+# Playwright's own image carries Chromium 1.64.1's browsers and system
+# libraries; its version must match @playwright/test in package-lock.json.
+# Not named "e2e": the test's launcher would shadow web/e2e/ in its runfiles.
+sh_test(
+    name = "playwright",
+    size = "large",
+    srcs = ["//tools/bazel:npm_test.sh"],
+    args = ["e2e"],
+    data = [
+        ":sources",
+        "//crates/console:console_fixture",
+        "@postgres_linux_amd64//:all",
+        "@postgres_linux_amd64//:bin/postgres",
+    ] + _NODE,
+    env = {
+        "PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright",
+        "TL3_CONSOLE_FIXTURE": "$(rootpath //crates/console:console_fixture)",
+        "TL3_TEST_POSTGRES_BIN": "$(rootpath @postgres_linux_amd64//:bin/postgres)",
+    } | {"NODE": "$(rootpath @nodejs_linux_amd64//:bin/node)"},
+    exec_properties = _NETWORK | {
+        "container-image": "docker://mcr.microsoft.com/playwright@sha256:ee15712262f017b8157421b212b12099146645f44b1bc5c0514cbbe6a229b1d0",
+        "EstimatedCPU": "4",
+        "EstimatedMemory": "8GB",
+    },
+    tags = [
+        "requires-network",
+        "web",
+    ],
+    target_compatible_with = ["@platforms//cpu:x86_64"],
+)
