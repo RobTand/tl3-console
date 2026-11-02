@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { startFixture } from "./fixture";
 
+const LABELS: Record<string, string> = { NeedsRob: "Needs Rob" };
+
 test("opening a card shows its case file, and a commit adds to its timeline live", async ({ page }) => {
   const fixture = await startFixture();
   try {
@@ -15,8 +17,10 @@ test("opening a card shows its case file, and a commit adds to its timeline live
     const timeline = drawer.getByRole("region", { name: "Timeline" }).getByRole("listitem");
     await expect(timeline.first()).toContainText("Rob labelled the issue");
     const before = await timeline.count();
-    await fixture.advance();
-    await expect(timeline).toHaveCount(before + 1);
+    // One advance can start several steps; the newest is in the card's new stage.
+    const column = await fixture.advance();
+    await expect.poll(() => timeline.count()).toBeGreaterThan(before);
+    await expect(timeline.last()).toContainText(LABELS[column] ?? column);
     await page.keyboard.press("Escape");
     await expect(drawer).toHaveCount(0);
     await expect(page).not.toHaveURL(/request=/);

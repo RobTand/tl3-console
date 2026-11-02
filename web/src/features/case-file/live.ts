@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Card, CaseFile } from "../../api/types.gen";
 
@@ -24,8 +24,7 @@ export function useCaseFile(
       if (!response.ok) throw new Error(`The console answered ${response.status}`);
       return (await response.json()) as CaseFile;
     },
-    // Keep showing the last case file while a newer one loads, so nothing jumps.
-    placeholderData: keepPreviousData,
+    // A refetch keeps showing the last case file until the new one arrives.
     staleTime: Infinity,
     retry: (failures, error) => !(error instanceof NotFound) && failures < 2,
   });
