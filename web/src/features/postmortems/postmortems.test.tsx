@@ -6,6 +6,7 @@ import { caseFile, T0 } from "../case-file/fixtures";
 import { CardCommands, CommandsProvider } from "../commands";
 import { card } from "../../fixtures";
 import { PostmortemTab } from "./PostmortemTab";
+import type { Postmortem } from "../../api/types.gen";
 
 const postmortem = {
   id: 3,
@@ -33,7 +34,7 @@ const postmortem = {
   rubric_version: null,
   recommendations: [],
 };
-function setup(status = "owed") {
+function setup(status = "owed", fields: Partial<Postmortem> = {}) {
   vi.stubGlobal(
     "fetch",
     vi.fn(
@@ -42,7 +43,7 @@ function setup(status = "owed") {
           JSON.stringify(
             url.includes("postmortems")
               ? {
-                  postmortems: [{ ...postmortem, status }],
+                  postmortems: [{ ...postmortem, status, ...fields }],
                   grades: [
                     {
                       id: 1,
@@ -129,4 +130,23 @@ it.each([
     `/api/requests/1/postmortems?${cursor.expected}`,
     expect.objectContaining({ signal: expect.any(AbortSignal) }),
   );
+});
+
+
+it.each([
+  ["owed", "Judge's findings arrive when the postmortem runs"],
+  ["running", "The judge is writing this postmortem."],
+  ["done", "No findings were recorded for this postmortem."],
+  ["failed", "The postmortem failed before findings were recorded."],
+])("explains empty findings for a %s postmortem", async (status, message) => {
+  const { wrap } = setup(status);
+  render(<PostmortemTab id={1} />, { wrapper: wrap });
+  expect(await screen.findByText(message)).toBeVisible();
+});
+
+it.each([{ timeline: [] }, { timeline: {} }])("hides an empty timeline alongside recorded findings: %j", async ({ timeline }) => {
+  const { wrap } = setup("done", { summary: "The worker recovered.", timeline });
+  render(<PostmortemTab id={1} />, { wrapper: wrap });
+  expect(await screen.findByText("The worker recovered.")).toBeVisible();
+  expect(screen.queryByRole("region", { name: "Postmortem timeline" })).not.toBeInTheDocument();
 });

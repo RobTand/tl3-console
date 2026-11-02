@@ -115,6 +115,17 @@ mod tests {
     }
 
     #[test]
+    fn postmortems_survive_coalescing_with_world_changes_in_either_order() {
+        for changes in [[Change::Postmortems, Change::World], [Change::World, Change::Postmortems]] {
+            let rebuilds = Rebuilds::default();
+            for change in changes { rebuilds.request(change); }
+            let combined = rebuilds.next().unwrap();
+            assert_ne!(combined, Change::World, "world alone loses postmortem invalidation");
+            assert_ne!(combined, Change::Postmortems, "postmortems alone loses the world rebuild");
+        }
+    }
+
+    #[test]
     fn a_world_change_covers_progress_ticks() {
         let rebuilds = Rebuilds::default();
         rebuilds.request(Change::Progress);

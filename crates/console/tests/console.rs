@@ -1843,7 +1843,7 @@ fn postmortem_scenarios() {
     controller.intake(issue(337)).unwrap();
     let mut admin = raw(&settings);
     admin.batch_execute(r#"INSERT INTO tl3_postmortems(node_id, trigger, reason, sample_share, repo, issue, title, revision, owed_at, status, cause, summary)
-        SELECT '0', 'close', 'sampled', 0.1, 'RobTand/tl3-sandbox', 337, 'Retry after disconnect', min(revision), '2026-11-01T00:00:00Z', 'done', 'outside', 'Network unavailable' FROM tl3_events;
+        SELECT '0', 'close', 'sampled', 0.1, 'RobTand/tl3-sandbox', 337, 'Transport journal', min(revision), '2026-11-01T00:00:00Z', 'done', 'outside', 'Network unavailable' FROM tl3_events;
         INSERT INTO tl3_postmortems(node_id, trigger, reason, repo, issue, title, revision, owed_at)
         SELECT '0', 'question:7', 'escalation', 'RobTand/tl3-sandbox', 337, 'Needs Rob', min(revision), '2026-11-02T00:00:00Z' FROM tl3_events;
         INSERT INTO tl3_postmortems(node_id, trigger, reason, repo, issue, title, revision, owed_at)
@@ -1909,6 +1909,12 @@ fn postmortem_scenarios() {
                 assert_eq!(result["postmortems"].as_array().unwrap().len(), 1);
                 assert_eq!(result["postmortems"][0]["trigger"], "close");
                 assert_eq!(result["postmortems"][0]["recommendations"][0]["seen_in"], 3);
+                assert_eq!(json("/api/postmortems?q=nonexistentzephyr")["postmortems"], serde_json::json!([]));
+                let title_only = json("/api/postmortems?q=journal");
+                assert_eq!(title_only["postmortems"].as_array().unwrap().len(), 1);
+                assert_eq!(title_only["postmortems"][0]["title"], "Transport journal");
+                let recommendation_only = json("/api/postmortems?q=automatically");
+                assert_eq!(recommendation_only["postmortems"].as_array().unwrap().len(), 3);
                 let first = json("/api/postmortems?limit=1");
                 let next = first["next_before"].as_i64().expect("another page");
                 assert!(
@@ -1936,9 +1942,28 @@ fn postmortem_scenarios() {
                 assert_eq!(result["postmortems"].as_array().unwrap().len(), 1);
                 assert_eq!(result["postmortems"][0]["recommendations"][0]["seen_in"], 1);
                 assert_eq!(get(hidden_address, "/api/postmortems/0").0, 404);
+                assert_eq!(get(address, "/api/postmortems/0").0, 404);
                 let response =
                     request(address, "GET", "/api/postmortems", Some("evil.example"), "");
                 assert_eq!(response.0, 421);
+            }),
+        ),
+        (
+            "postmortems_ignore_unrelated_world_commits",
+            Box::new(|| {
+                let mut stream = EventStream::open(address, None);
+                stream.board_event();
+                while stream.event().name != "postmortems" {}
+                controller.intake(issue(338)).unwrap();
+                stream.board_event();
+                let command = serde_json::json!({
+                    "id": "33700000-0000-4000-8000-000000000002",
+                    "action": {"kind": "pause"}
+                });
+                assert_eq!(send(address, "POST", "/api/requests/0/commands", &[("X-TL3-Console", "1")], Some(&command)).0, 202);
+                // This command is a barrier after the world patch. A spurious
+                // postmortem event from that commit would arrive before it.
+                assert_eq!(stream.event().name, "commands");
             }),
         ),
         (
@@ -1951,6 +1976,7 @@ fn postmortem_scenarios() {
                 while stream.event().name != "postmortems" {}
                 for sql in [
                     "UPDATE tl3_postmortems SET notes = 'Changed' WHERE node_id = '0'",
+                    "BEGIN; UPDATE tl3_postmortems SET notes = 'Coalesced' WHERE node_id = '0'; NOTIFY tl3_changes, 'tl3_world'; COMMIT",
                     "UPDATE tl3_postmortem_recommendations SET evidence = 'new evidence'",
                     "INSERT INTO tl3_code_grades(node_id, trigger, rubric_version, dimension, fact, revision, recorded_at) SELECT '0', 'close', 1, 'credit', '{}', min(revision), clock_timestamp() FROM tl3_events",
                 ] {

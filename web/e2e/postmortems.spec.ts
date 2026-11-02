@@ -35,8 +35,22 @@ test("postmortem command settles on the stream and the list opens the drawer", a
     await page.keyboard.press("Escape");
     await page.getByRole("link", { name: "Postmortems", exact: true }).click();
     await expect(page.getByText("Seen in 3 postmortems").first()).toBeVisible();
-    await page.getByRole("searchbox", { name: "Search postmortems" }).fill("calibration");
-    await page.getByRole("button", { name: "Search", exact: true }).click();
+    const search = page.getByRole("searchbox", { name: "Search postmortems" });
+    const submit = page.getByRole("button", { name: "Search", exact: true });
+    await search.fill("nonexistentzephyr");
+    await submit.click();
+    await expect(page.getByText("No postmortems match these filters.")).toBeVisible();
+    await expect(page.locator("tbody tr")).toHaveCount(0);
+    // This word appears only in recommendation text, not in a report title.
+    await search.fill("incompatible");
+    await submit.click();
+    await expect(page.locator("tbody tr")).toHaveCount(3);
+    await expect(page.getByRole("link", { name: "Retry Hindsight writes after a 429" })).toBeVisible();
+    // The reports for this request have no "Quantize" in their findings.
+    await search.fill("Quantize");
+    await submit.click();
+    await expect(page.locator("tbody tr")).toHaveCount(2);
+    await expect(page.getByRole("link", { name: "Retry Hindsight writes after a 429" })).toHaveCount(0);
     await page.getByRole("link", { name: "Quantize attention layers to FP8 with calibration" }).first().click();
     await expect(drawer).toBeVisible();
     await expect(drawer.getByRole("tab", { name: "Postmortem" })).toHaveAttribute("aria-selected", "true");
