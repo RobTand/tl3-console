@@ -127,7 +127,9 @@ pub struct BlockedReport {
     pub report: Option<String>,
 }
 
+// TL3's card question has its own QuestionOption; the two share one TypeScript file.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[ts(rename = "PendingOption")]
 pub struct QuestionOption {
     pub action: String,
     pub outcome: String,
@@ -344,6 +346,17 @@ impl Stored {
                 .get(0),
             None => false,
         };
+        // The board's card shows the question's findings from its stored context (#322).
+        let question_context = match node.question {
+            Some(question) => tx
+                .query_opt(
+                    "SELECT value FROM tl3_world WHERE table_name = 'question_context' AND row_id = $1",
+                    &[&question.id.to_string()],
+                )
+                .map_err(tl3_store::Error::from)?
+                .map(|row| row.get(0)),
+            None => None,
+        };
         let stored = incidents(tx, &key)?;
         let open = stored
             .iter()
@@ -375,6 +388,7 @@ impl Stored {
                 && session["replanned"] == node.replanned)
                 .then(|| session["model"].as_str().map(str::to_owned))
                 .flatten(),
+            question_context,
             node,
         };
         Ok(Some(Stored {
@@ -1304,6 +1318,7 @@ mod tests {
             worker_failure: None,
             incidents: Vec::new(),
             maker_model: None,
+            question_context: None,
         };
         // The delivery lacks the kernel question binding writer_input needs.
         let delivery = serde_json::from_value(json!({

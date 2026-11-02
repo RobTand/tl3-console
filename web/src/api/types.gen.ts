@@ -32,7 +32,11 @@ credit: number | null,
 /**
  * When the request entered its current phase, in Unix milliseconds.
  */
-phase_since_ms: number | null, last_progress: string | null, incidents: Array<CardIncident>, badges: Array<Badge>, };
+phase_since_ms: number | null, last_progress: string | null, incidents: Array<CardIncident>, badges: Array<Badge>, 
+/**
+ * The open question, with the options Rob can answer from the console.
+ */
+question: CardQuestion | null, };
 
 export type CardIncident = { id: string, summary: string, };
 
@@ -172,12 +176,12 @@ evidence: string,
  */
 report: string | null, };
 
-export type QuestionOption = { action: string, outcome: string, };
+export type PendingOption = { action: string, outcome: string, };
 
 /**
  * The question waiting on Rob, as the writer was asked to put it.
  */
-export type PendingQuestion = { id: number, kind: string, obstacle: string, options: Array<QuestionOption>, 
+export type PendingQuestion = { id: number, kind: string, obstacle: string, options: Array<PendingOption>, 
 /**
  * An index into `options`.
  */
@@ -196,3 +200,77 @@ export type Link = { kind: LinkKind,
  * The link's accessible name.
  */
 label: string, url: string, };
+
+/**
+ * An open question as Rob sees it on the issue, with its options.
+ */
+export type CardQuestion = { 
+/**
+ * The number Rob names when he answers on GitHub.
+ */
+id: number, prompt: string, options: Array<QuestionOption>, 
+/**
+ * The index of TL3's recommended option.
+ */
+recommended: number, reason: string, 
+/**
+ * Why "Let TL3 decide" can't apply the recommendation; None when it can.
+ */
+defer_blocked: string | null, 
+/**
+ * The one decision the question asks, from the deciding worker's findings (#322).
+ */
+decision: string | null, 
+/**
+ * The deciding worker's findings and evidence, as the writer received them (#322).
+ */
+findings: Record<string, unknown> | null, };
+
+export type QuestionOption = { answer: AnswerKind, label: string, outcome: string, detail: Detail | null, };
+
+/**
+ * A question option's answer, without its details.
+ */
+export type AnswerKind = "continue" | "stop" | "retry" | "mark_handled" | "try_again" | "add_credit" | "change_request";
+
+/**
+ * What an option needs from Rob before it can apply.
+ */
+export type Detail = "text" | "guidance" | "amount";
+
+export type Action = { "kind": "pause", } | { "kind": "resume", } | { "kind": "stop", } | { "kind": "restart", } | { "kind": "clear_incident", incident: string, } | { "kind": "answer", question: number, choice: Choice, } | { "kind": "defer", question: number, } | { "kind": "comment", text: string, };
+
+/**
+ * One of a question's options, with the details it needs from Rob.
+ */
+export type Choice = { "answer": "continue", } | { "answer": "stop", } | { "answer": "retry", } | { "answer": "mark_handled", } | { "answer": "try_again", guidance: string, } | { "answer": "add_credit", amount: number, } | { "answer": "change_request", text: string, };
+
+/**
+ * `POST /api/requests/{id}/commands`.
+ */
+export type CommandRequest = { 
+/**
+ * A lowercase UUID the browser chooses; resending it files nothing more.
+ */
+id: string, action: Action, };
+
+/**
+ * The answer to a command: filed for tl3d, or already filed under this id.
+ */
+export type Filed = { id: string, filed: boolean, };
+
+export type CommandStatus = "pending" | "applied" | "refused";
+
+/**
+ * A filed command and how it settled.
+ */
+export type CommandRecord = { id: string, node: number, 
+/**
+ * None when the stored action isn't one this console knows.
+ */
+action: Action | null, status: CommandStatus, reason: string | null, received_ms: number, settled_ms: number | null, };
+
+/**
+ * The stream's `commands` event: the newest filed commands and how each settled.
+ */
+export type CommandsEvent = { commands: Array<CommandRecord>, };
