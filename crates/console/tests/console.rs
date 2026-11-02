@@ -1215,8 +1215,15 @@ fn hides_repos_from_every_view(assets: &Path) -> Database {
         )
         .unwrap()
     };
-    let console =
-        start(HiddenRepos::new(&[format!("RobTand/{HIDDEN}")], &config.github.repos).unwrap());
+    // Cased unlike the stored `RobTand/tl3-sandbox`: GitHub ignores case, so
+    // the store's side of the comparison must too.
+    let console = start(
+        HiddenRepos::new(
+            &[format!("ROBTAND/{}", HIDDEN.to_ascii_uppercase())],
+            &config.github.repos,
+        )
+        .unwrap(),
+    );
     let address = console.address();
     let board_of = |address| -> Value {
         let (status, _, body) = get(address, "/api/board");
@@ -1275,8 +1282,90 @@ fn hides_repos_from_every_view(assets: &Path) -> Database {
         }
     }
 
+    // A newer request for the hidden issue replaces request 0, which then
+    // leaves the board's rows. tl3d writes the replacement's node in the same
+    // commit; the binding alone makes it the newest, so it is all this stores.
+    // An input failure on a hidden issue has no request, and a shown one is
+    // the control.
+    let replacement = 100;
+    let incident = |id: &str, repo: &str, issue: u64| {
+        serde_json::json!({
+            "id": id, "node": null, "open": true, "needs_rob": false, "blocking": false,
+            "summary": format!("Reading {repo}#{issue} failed. Other requests can continue."),
+            "signature": {"upstream": "GitHub", "class": "transport"},
+            "effect": null, "post_key": null, "cause": "upstream",
+            "input_failure": {
+                "scope": format!("intake:robtand/{repo}/1:{issue}"),
+                "target": {
+                    "repository": {"owner": "RobTand", "name": repo, "installation": 1},
+                    "issue": issue,
+                },
+                "title": "Failed read", "posted": true, "attempted_epoch": null,
+            },
+        })
+    };
+    {
+        let mut store = Store::open(&settings).unwrap();
+        let snapshot = store.load().unwrap();
+        let original = snapshot
+            .rows
+            .iter()
+            .find(|row| row.table == "requests" && row.id == first_hidden.to_string())
+            .unwrap()
+            .value
+            .clone();
+        let mut commit =
+            tl3_store::Commit::new("console-hidden-rows", serde_json::json!("rows"), &snapshot);
+        for (table, id, value) in [
+            ("requests", replacement.to_string(), original),
+            (
+                "incidents",
+                "input.hidden".to_string(),
+                incident("input.hidden", HIDDEN, 77),
+            ),
+            (
+                "incidents",
+                "input.shown".to_string(),
+                incident("input.shown", "tl3-console", 78),
+            ),
+        ] {
+            commit.rows.push(tl3_store::RowChange::Put {
+                table: table.into(),
+                id,
+                value,
+            });
+        }
+        store.commit(&commit).unwrap();
+    }
+    // The shown incident reaches the board; the hidden one never does, and
+    // nothing of it reaches a patch on the way.
+    loop {
+        let event = stream.board_event();
+        assert_eq!(event.name, "patch");
+        assert!(!event.data.to_string().contains(HIDDEN), "{}", event.data);
+        assert!(!event.data.to_string().contains("input.hidden"));
+        let shown_incidents = event.data["patch"]["unassigned_incidents"]
+            .as_array()
+            .unwrap();
+        if !shown_incidents.is_empty() {
+            assert_eq!(shown_incidents.len(), 1);
+            assert_eq!(shown_incidents[0]["id"], "input.shown");
+            break;
+        }
+    }
+    // A new connection's snapshot and the board route agree.
+    let mut fresh = EventStream::open_with_guard(address, None, Duration::from_secs(30));
+    let snapshot = fresh.board_event();
+    assert_eq!(snapshot.name, "snapshot");
+    for board in [snapshot.data, board_of(address)] {
+        assert_eq!(board["unassigned_incidents"].as_array().unwrap().len(), 1);
+        assert_eq!(board["unassigned_incidents"][0]["id"], "input.shown");
+        assert!(!board.to_string().contains(HIDDEN), "{board}");
+        assert_eq!(issues(&board), [7, 8]);
+    }
+
     // The case file and the command route answer 404 for a hidden request,
-    // as for one that doesn't exist, and file nothing.
+    // and file nothing.
     let open = |address, node: u64| get(address, &format!("/api/requests/{node}")).0;
     assert_eq!(open(address, first_hidden), 404);
     assert_eq!(
@@ -1300,6 +1389,16 @@ fn hides_repos_from_every_view(assets: &Path) -> Database {
         !filed(&settings, refused),
         "nothing filed for a hidden request"
     );
+    // The replacement is hidden too, though no card or case file shows it.
+    let refused_replacement = "6d6f6f6e-0000-4000-8000-000000000005";
+    let (status, _) = post(
+        address,
+        &format!("/api/requests/{replacement}/commands"),
+        &own,
+        &command(refused_replacement),
+    );
+    assert_eq!(status, 404);
+    assert!(!filed(&settings, refused_replacement));
     let accepted = "6d6f6f6e-0000-4000-8000-000000000002";
     let (status, _) = post(
         address,
@@ -1311,7 +1410,8 @@ fn hides_repos_from_every_view(assets: &Path) -> Database {
     assert!(filed(&settings, accepted));
 
     // Commands that reached the store for a hidden request (from an older
-    // console, or tl3d's own tools) never reach the browser either.
+    // console, or tl3d's own tools) never reach the browser either. Request 0
+    // is no longer in the board's rows, yet its command stays hidden.
     let mut direct = tl3_store::ConsoleCommands::open(&settings).unwrap();
     let leaked = "6d6f6f6e-0000-4000-8000-000000000003";
     let pause = serde_json::json!({"kind": "comment", "text": "secret sandbox words"});
