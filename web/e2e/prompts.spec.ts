@@ -18,7 +18,7 @@ test("Rob edits a prompt, sees the diff, saves it as the active version, and rev
     const diff = page.getByLabel("Changes from v1");
     await expect(diff.locator(".cm-changedLine", { hasText: LINE })).toBeVisible();
     // An added line shows as added, with no removed blank line beside it.
-    await expect(diff.locator(".cm-deletedChunk")).toHaveCount(0);
+    await expect(diff.locator(".cm-deletedLine")).toHaveCount(0);
 
     await page.getByRole("textbox", { name: "Note" }).fill("Shorter notes for Rob.");
     await page.getByRole("button", { name: "Save as v2" }).click();

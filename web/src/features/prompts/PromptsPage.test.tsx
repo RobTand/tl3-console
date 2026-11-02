@@ -182,7 +182,7 @@ describe("PromptsPage", () => {
     await user.type(await screen.findByRole("textbox", { name: "Reviewer prompt, Markdown" }), " Mine.");
     await user.type(screen.getByRole("textbox", { name: "Note" }), "Why.");
     saveElsewhere("Review prompt from another tab.");
-    await user.click(screen.getByRole("button", { name: "Save as v4" }));
+    await user.click(screen.getByRole("button", { name: "Save as v3" }));
     expect(await screen.findByRole("status")).toHaveTextContent(
       "v3 became active while you edited. Your edit is kept; check its changes against v3, then save.",
     );

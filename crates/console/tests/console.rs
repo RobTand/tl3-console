@@ -612,9 +612,14 @@ fn refuses_an_older_schema(database: &mut Database, assets: &Path) {
         )
         .unwrap()
         .get(0);
+    // Pinned versions may skip one another's numbers, as 12 skips 11 until it merges.
+    let previous: i32 = raw(&settings)
+        .query_one("SELECT max(version) FROM tl3_schema_migrations", &[])
+        .unwrap()
+        .get(0);
     let error = tl3_console::check(&settings).unwrap_err().to_string();
     assert!(
-        error.contains(&format!("schema version {}", pinned - 1)),
+        error.contains(&format!("schema version {previous}")),
         "{error}"
     );
     let console = start_console(&settings, assets);
