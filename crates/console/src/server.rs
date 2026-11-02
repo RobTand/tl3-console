@@ -6,7 +6,7 @@ use crate::{
 };
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     http::{HeaderValue, StatusCode, header},
     response::{
         IntoResponse, Response,
@@ -59,12 +59,15 @@ pub(crate) fn router(
 /// The largest request body any route reads.
 pub(crate) const BODY_LIMIT: usize = 64 * 1024;
 
-/// What every route sits behind: the Host allowlist and the body limit.
+/// What every route sits behind, added last so it covers the routes merged in
+/// before it: the Host allowlist, then the body limit on any route that reads
+/// a body. Axum's own default limit is 2 MiB.
 pub(crate) fn harden(app: Router, hosts: crate::hosts::Hosts) -> Router {
-    app.layer(axum::middleware::from_fn_with_state(
-        hosts,
-        crate::hosts::guard,
-    ))
+    app.layer(DefaultBodyLimit::max(BODY_LIMIT))
+        .layer(axum::middleware::from_fn_with_state(
+            hosts,
+            crate::hosts::guard,
+        ))
 }
 
 async fn board(State(published): State<watch::Receiver<Published>>) -> Response {
@@ -177,7 +180,7 @@ fn json(event: Event, data: &impl serde::Serialize) -> Event {
 mod tests {
     use super::*;
     use crate::hosts::Hosts;
-    use axum::{body::Bytes, routing::post};
+    use axum::body::Bytes;
     use std::{
         io::{Read, Write},
         os::unix::net::UnixStream,

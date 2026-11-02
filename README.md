@@ -137,15 +137,44 @@ user = "tl3_console"
 password_file = "/home/rob/.config/tl3/secrets/console-postgres-password"
 tl3_config = "/home/rob/.config/tl3/tl3.toml"
 traces = "http://192.168.1.107:5033/#/experiments/2/traces"
+public_hosts = ["console.example.test"]
 ```
 
 `traces` is optional. With it, the case file links each worker run to its
 MLflow traces; without it, runs have no trace link. Deploy writes the file only
 once, so add the line by hand to an existing install and restart the console.
 
+`public_hosts` is optional. See "Host names" below.
+
 The console reads `tl3.toml` with the pinned TL3's own parser and uses only its
 `[store]` and `[models]` sections and its served repositories, whose branch
 templates name the case file's branch links.
+
+## Host names
+
+A web page on another site can point its own host name at the console's
+address (DNS rebinding). The browser then treats the console as that site and
+sends that name as `Host` and `Origin`, so checking `Origin` against `Host`
+proves nothing. The console answers only to the `Host` names it serves and
+refuses every other request with `421 Misdirected Request`. Nothing is served.
+That holds for every route, reads and the event stream included, and for
+requests with no `Host`.
+
+The console serves:
+
+- its `listen` address with the port, for example `192.168.1.107:8034`;
+- `localhost:<port>`, when `listen` is a loopback address;
+- each name in `public_hosts`, such as a tunnel's public name, compared without
+  regard to case. Give the port too when clients use one. A name is letters,
+  digits and `.-:[]`; the console refuses to start on anything else.
+
+A browser that reaches the console by another name, such as a DNS alias, gets
+`421` until you add that name to `public_hosts` and restart the console.
+`npm run dev` proxies `/api` with the console's own `Host`, so it works too.
+
+Every route also reads at most 64 KiB of request body. A larger body gets
+`413`. The limit sits next to the allowlist in `server::harden`, so a route
+added later is covered without extra code.
 
 ## The TL3 pin
 

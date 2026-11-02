@@ -21,21 +21,31 @@ pub(crate) const NAME_RULE: &str =
 /// A public host name is letters, digits and `.-:[]`, so a header value or a
 /// URL can't pass for one.
 pub(crate) fn valid_name(name: &str) -> bool {
-    let _ = name;
-    true
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
 }
 
 impl Hosts {
     /// The bound address, `localhost` on a loopback address, and the public
     /// names the config lists, such as a tunnel's.
     pub(crate) fn new(address: SocketAddr, public: &[String]) -> crate::Result<Self> {
-        let _ = (address, public);
-        Ok(Self(Arc::new(BTreeSet::new())))
+        let mut names = BTreeSet::from([address.to_string()]);
+        if address.ip().is_loopback() {
+            names.insert(format!("localhost:{}", address.port()));
+        }
+        for name in public {
+            if !valid_name(name) {
+                return Err(crate::Error::Invalid(NAME_RULE));
+            }
+            names.insert(name.to_ascii_lowercase());
+        }
+        Ok(Self(Arc::new(names)))
     }
 
     pub(crate) fn allows(&self, host: Option<&str>) -> bool {
-        let _ = host;
-        true
+        host.is_some_and(|host| self.0.contains(&host.to_ascii_lowercase()))
     }
 }
 
