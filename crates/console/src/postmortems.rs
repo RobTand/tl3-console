@@ -217,7 +217,7 @@ async fn respond(views: Views, id: Option<u64>, filters: Filters) -> Response {
     }
     let store = views.store.clone();
     let sessions = views.sessions.clone();
-    let result = sessions.run(move || Ok(Session::open(&store, "postmortems")?), move |session| {
+    let result: crate::Result<Option<Value>> = sessions.run(move || Ok(Session::open(&store, "postmortems")?), move |session| {
         let mut tx = session.transaction()?;
         // Filters without their own upstream index are still bounded in time.
         tx.batch_execute("SET LOCAL statement_timeout = '3s'; SET LOCAL timezone = 'UTC'").map_err(tl3_store::Error::from)?;
