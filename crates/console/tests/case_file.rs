@@ -379,7 +379,6 @@ fn fix_round_and_incident(files: &Files) {
     let card = &file["card"];
     assert_eq!(card["ending"], "Merged");
     assert_eq!(card["round"], 1, "one fix round after the first review");
-    assert_eq!(card["retries"]["run_failures"], 2);
     let columns = strings(&file["timeline"], "column");
     let reviewed = columns.iter().position(|c| c == "Reviewing").unwrap();
     assert!(

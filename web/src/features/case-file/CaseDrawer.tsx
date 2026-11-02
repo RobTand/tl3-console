@@ -283,10 +283,11 @@ function Runs({ runs, now }: { runs: WorkerRun[]; now: number }) {
 }
 
 function Incidents({ incidents }: { incidents: CaseIncident[] }) {
+  const ordered = [...incidents].sort((a, b) => Number(b.open) - Number(a.open));
   return (
     <Section title="Incidents" count={incidents.length}>
       <ul className="flex flex-col gap-2">
-        {incidents.map((incident) => (
+        {ordered.map((incident) => (
           <li key={incident.id} className="text-xs">
             <p className="flex flex-wrap items-center gap-1">
               <Chip tone={incident.open ? "bg-danger-soft text-danger" : "bg-surface-2 text-muted"}>
