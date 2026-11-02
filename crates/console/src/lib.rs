@@ -20,6 +20,7 @@ mod supervise;
 use rebuild::{Change, Rebuilds};
 use schema::Session;
 use std::{
+    collections::BTreeSet,
     net::SocketAddr,
     path::PathBuf,
     sync::{
@@ -124,15 +125,15 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         public_hosts,
         hidden,
     } = options;
-    let _ = hidden;
     let hosts = hosts::Hosts::new(address, &public_hosts)?;
     let case_files = case_file::CaseFiles {
         store: store.clone(),
         models: models.clone().map(Arc::new),
         links: Arc::new(links),
         sessions: sessions::Sessions::new(case_file::SESSIONS),
+        hidden: hidden.clone(),
     };
-    let filer = commands::router(store.clone());
+    let filer = commands::router(store.clone(), hidden.clone(), case_files.sessions.clone());
     {
         let (store, rebuilds, connected) = (store.clone(), rebuilds.clone(), connected.clone());
         supervisor.spawn("feed", move || feed::run(store, rebuilds, connected))?;
@@ -141,6 +142,8 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         let mut board = Builder {
             store,
             models,
+            hidden,
+            hidden_requests: BTreeSet::new(),
             reader: None,
             rows: None,
             commands: None,
@@ -215,6 +218,10 @@ const COMMANDS_SHOWN: i64 = 200;
 struct Builder {
     store: tl3_config::Store,
     models: Option<tl3_config::Models>,
+    /// Their requests never reach the board or its commands.
+    hidden: hidden::HiddenRepos,
+    /// Node ids of every hidden repository's requests, as of the last full read.
+    hidden_requests: BTreeSet<u64>,
     reader: Option<Session>,
     rows: Option<Rows>,
     /// The newest commands as last read; a progress tick keeps them.
@@ -248,12 +255,24 @@ impl Builder {
                 rows.refresh_progress(&mut tx)?;
                 rows
             }
-            _ => Rows::read(&mut tx)?,
+            _ => {
+                let mut rows = Rows::read(&mut tx)?;
+                // Dropped before projecting, so the counts leave them out too.
+                self.hidden_requests = self.hidden.requests(&mut tx)?;
+                rows.requests
+                    .retain(|request| !self.hidden_requests.contains(&request.id.0));
+                rows
+            }
         };
         // tl3d settles commands in its own commits, so World rereads them too.
         let commands = match (change, self.commands.take()) {
             (Change::Progress, Some(commands)) => commands,
-            _ => commands::brief(tl3_controller::console::recent(&mut tx, COMMANDS_SHOWN)?),
+            _ => {
+                let mut commands =
+                    commands::brief(tl3_controller::console::recent(&mut tx, COMMANDS_SHOWN)?);
+                commands.retain(|command| !self.hidden_requests.contains(&command.node));
+                commands
+            }
         };
         self.commands = Some(commands.clone());
         tx.commit().map_err(tl3_store::Error::from)?;

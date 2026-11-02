@@ -139,6 +139,7 @@ password_file = "/home/rob/.config/tl3/secrets/console-postgres-password"
 tl3_config = "/home/rob/.config/tl3/tl3.toml"
 traces = "http://192.168.1.107:5033/#/experiments/2/traces"
 public_hosts = ["console.example.test"]
+hide_repos = ["RobTand/tl3-sandbox"]
 ```
 
 `traces` is optional. With it, the case file links each worker run to its
@@ -147,9 +148,30 @@ once, so add the line by hand to an existing install and restart the console.
 
 `public_hosts` is optional. See "Host names" below.
 
+`hide_repos` is optional and defaults to none. See "Hidden repositories" below.
+
 The console reads `tl3.toml` with the pinned TL3's own parser and uses only its
 `[store]` and `[models]` sections and its served repositories, whose branch
 templates name the case file's branch links.
+
+## Hidden repositories
+
+`hide_repos` lists served repositories (`owner/name`, without regard to case)
+whose requests the console never shows. The console filters on the server, so
+nothing hidden reaches the browser:
+
+- the board snapshot, every stream patch and the flow counts leave the
+  repository's requests out, and so do Needs Rob and "Let TL3 decide on all";
+- the `commands` stream event leaves out commands filed for its requests;
+- the case file (`GET /api/requests/{id}`) and the command route
+  (`POST /api/requests/{id}/commands`) answer `404` for them, as for a
+  request that doesn't exist, and file nothing.
+
+An entry that isn't one of TL3's served repositories (`github.repos` in
+`tl3.toml`) fails `tl3-console check` and the console's start with a message
+that names it, so a typo can't quietly hide nothing. Deploy runs `check` before
+it installs. Open incidents that belong to no request carry no repository, so
+they still show. Add the line to the config by hand and restart the console.
 
 ## Host names
 

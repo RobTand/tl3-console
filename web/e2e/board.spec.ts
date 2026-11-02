@@ -47,11 +47,14 @@ test("board screenshots in both themes", async ({ page }) => {
       const card = page.getByRole("region", { name: "Needs Rob" }).getByRole("article", { name: /tl3-sandbox#43:/ });
       await expect(card).toBeVisible();
       await card.getByRole("link", { name: "tl3-sandbox#43" }).hover();
-      await card.screenshot({ path: `${process.env.TL3_SCREENSHOTS}/issue-link-hover-${scheme}.png` });
+      // A clip of the page keeps the pointer where it is; an element shot would not.
+      const box = (await card.boundingBox())!;
+      await page.screenshot({ path: `${process.env.TL3_SCREENSHOTS}/issue-link-hover-${scheme}.png`, clip: box });
       await card.getByRole("link", { name: "tl3-sandbox#43" }).focus();
       await page.keyboard.press("Shift+Tab");
       await page.keyboard.press("Tab");
-      await card.screenshot({ path: `${process.env.TL3_SCREENSHOTS}/issue-link-focus-${scheme}.png` });
+      await page.mouse.move(0, 0);
+      await page.screenshot({ path: `${process.env.TL3_SCREENSHOTS}/issue-link-focus-${scheme}.png`, clip: box });
     }
   } finally {
     await fixture.stop();
@@ -71,6 +74,11 @@ test("an issue reference opens GitHub in a new tab and leaves the case file clos
     const issue = "https://github.com/RobTand/tl3-sandbox/issues/43";
     await expect(link).toHaveAttribute("href", issue);
     await expect(link).toHaveAttribute("target", "_blank");
+    // At rest it reads as the card's muted text; under the pointer it underlines.
+    const name = link.locator("span").first();
+    await expect(name).toHaveCSS("text-decoration-line", "none");
+    await link.hover();
+    await expect(name).toHaveCSS("text-decoration-line", "underline");
 
     const clicked = context.waitForEvent("page");
     await link.click();
@@ -96,7 +104,7 @@ test("an issue reference opens GitHub in a new tab and leaves the case file clos
     await card.getByRole("heading").getByRole("link").click();
     const drawer = page.getByRole("dialog");
     await expect(drawer).toBeVisible();
-    const header = drawer.getByRole("link", { name: "RobTand/tl3-sandbox#43" });
+    const header = drawer.getByRole("link", { name: "RobTand/tl3-sandbox#43", exact: true });
     await expect(header).toHaveAttribute("href", issue);
     await expect(drawer.getByRole("link", { name: "Issue RobTand/tl3-sandbox#43 on GitHub" })).toHaveAttribute("href", issue);
   } finally {

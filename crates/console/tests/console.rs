@@ -50,6 +50,8 @@ fn main() {
     println!("test serves_board_and_web_app ... ok");
     console_reads_through_a_role_that_cannot_write(&settings);
     println!("test console_reads_through_a_role_that_cannot_write ... ok");
+    let hidden_database = hides_repos_from_every_view(assets.path());
+    println!("test hides_repos_from_every_view ... ok");
     refuses_hosts_the_console_does_not_serve(&settings, assets.path());
     println!("test refuses_hosts_the_console_does_not_serve ... ok");
     cards_follow_the_quota_fallback(&settings, assets.path());
@@ -75,11 +77,10 @@ fn main() {
     println!("test refuses_an_older_schema ... ok");
     refuses_a_conflicting_schema(&mut database, assets.path());
     println!("test refuses_a_conflicting_schema ... ok");
-    hides_repos_from_every_view(&mut database, assets.path());
-    println!("test hides_repos_from_every_view ... ok");
     streams_again_after_postgres_restarts(address, &mut database, &settings, records.path());
     println!("test streams_again_after_postgres_restarts ... ok");
     database.stop();
+    hidden_database.stop();
     println!("18 console scenarios passed; no skips");
 }
 
@@ -1167,8 +1168,11 @@ fn issue_in(repo: &str, number: u64) -> LabelledIssue {
 /// browser through no route. The board, its stream, the counts, the case file
 /// and the command route all behave as if the repository did not exist. The
 /// store keeps both repositories' requests.
-fn hides_repos_from_every_view(database: &mut Database, assets: &Path) {
+fn hides_repos_from_every_view(assets: &Path) -> Database {
     const HIDDEN: &str = "tl3-sandbox";
+    // Its own server: the shared one is near its 20-connection limit, and a
+    // console keeps its sessions for the life of the process.
+    let mut database = Database::start();
     let settings = database.create("console_hidden");
     let records = tempfile::tempdir().unwrap();
     let mut controller = Controller::open(
@@ -1335,4 +1339,5 @@ fn hides_repos_from_every_view(database: &mut Database, assets: &Path) {
             break;
         }
     }
+    database
 }

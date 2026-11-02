@@ -4,6 +4,7 @@
 //! can't send, and a same-origin browser.
 
 use crate::api::{CommandRequest, Filed};
+use crate::{schema::Session, sessions::Sessions};
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Path, State, rejection::JsonRejection},
@@ -28,6 +29,10 @@ const MAX_BODY_BYTES: usize = 4 * 1024 + 6 * MAX_TEXT_CHARS;
 #[derive(Clone)]
 struct Filer {
     settings: tl3_config::Store,
+    /// A hidden repository's requests take no commands.
+    hidden: crate::hidden::HiddenRepos,
+    /// Reads which repository a request belongs to.
+    sessions: Arc<Sessions<Session>>,
     session: Arc<Mutex<Option<ConsoleCommands>>>,
 }
 
@@ -67,12 +72,18 @@ fn is_connection(error: &tl3_store::Error) -> bool {
     matches!(error, tl3_store::Error::Database(error) if error.is_closed() || error.as_db_error().is_none())
 }
 
-pub(crate) fn router(settings: tl3_config::Store) -> Router {
+pub(crate) fn router(
+    settings: tl3_config::Store,
+    hidden: crate::hidden::HiddenRepos,
+    sessions: Arc<Sessions<Session>>,
+) -> Router {
     Router::new()
         .route("/api/requests/{id}/commands", post(file))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(Filer {
             settings,
+            hidden,
+            sessions,
             session: Arc::default(),
         })
 }
@@ -133,6 +144,36 @@ async fn file(
             StatusCode::FORBIDDEN,
             "Commands come only from the console's own page.",
         );
+    }
+    // Whatever the body says, a hidden request looks like one that doesn't exist.
+    if !filer.hidden.is_empty() {
+        let (store, hidden) = (filer.settings.clone(), filer.hidden.clone());
+        let hides: crate::Result<bool> = filer
+            .sessions
+            .run(
+                move || Ok(Session::open(&store, "command")?),
+                move |reader| {
+                    let mut tx = reader.transaction()?;
+                    let hides = hidden.hides(&mut tx, node)?;
+                    tx.commit().map_err(tl3_store::Error::from)?;
+                    Ok(hides)
+                },
+            )
+            .await;
+        match hides {
+            Ok(true) => return refused(StatusCode::NOT_FOUND, "No request has that id."),
+            Ok(false) => {}
+            Err(error) => {
+                eprintln!(
+                    "console command for {node} not checked: {}",
+                    crate::describe(&error)
+                );
+                return refused(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "The console couldn't reach the store; try again.",
+                );
+            }
+        }
     }
     let request = match body {
         Ok(Json(request)) => request,

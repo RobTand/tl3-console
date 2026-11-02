@@ -8,6 +8,7 @@
 //! tl3_config = "/home/rob/.config/tl3/tl3.toml"
 //! traces = "http://192.168.1.107:5033/#/experiments/2/traces"
 //! public_hosts = ["console.example.test"]
+//! hide_repos = ["RobTand/tl3-sandbox"]
 //! ```
 //!
 //! The console reads `tl3.toml` with the pinned TL3's own parser, and keeps
@@ -134,7 +135,7 @@ impl File {
     }
 }
 
-fn invalid(field: &str, message: impl ToString) -> crate::Error {
+pub(crate) fn invalid(field: &str, message: impl ToString) -> crate::Error {
     crate::Error::Config(tl3_config::Error::Invalid {
         field: field.into(),
         message: message.to_string(),

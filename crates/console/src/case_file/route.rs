@@ -18,6 +18,8 @@ pub(crate) struct CaseFiles {
     pub models: Option<Arc<tl3_config::Models>>,
     pub links: Arc<Links>,
     pub sessions: Arc<Sessions<Session>>,
+    /// Their requests have no case file.
+    pub hidden: crate::hidden::HiddenRepos,
 }
 
 /// Case files read at once, each on its own read-only session.
@@ -63,6 +65,10 @@ fn read(
     now_ms: i64,
 ) -> crate::Result<Option<CaseFile>> {
     let mut tx = reader.transaction()?;
+    if files.hidden.hides(&mut tx, id)? {
+        tx.commit().map_err(tl3_store::Error::from)?;
+        return Ok(None);
+    }
     let file = super::read(&mut tx, id, now_ms, files.models.as_deref(), &files.links)?;
     tx.commit().map_err(tl3_store::Error::from)?;
     Ok(file)
