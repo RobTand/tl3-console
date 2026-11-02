@@ -8,7 +8,7 @@ import { useCommands } from "./commands";
  * will get before Rob confirms, then defers each one. tl3d skips, with a
  * reason, any question answered in the meantime.
  */
-export function DeferAll({ cards }: { cards: Card[] }) {
+export function DeferAll({ cards }: { cards: Card[]; filtered?: boolean }) {
   const { run } = useCommands();
   const [open, setOpen] = useState(false);
   const asked = cards.filter((card) => card.question !== null);

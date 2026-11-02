@@ -32,6 +32,7 @@ fn run() -> tl3_console::Result<()> {
             store: console.store(&config.store),
             assets: console.assets,
             models: Some(config.models),
+            public_hosts: vec![],
         },
     )?;
     println!("Console listening on http://{}", running.address());

@@ -145,7 +145,16 @@ describe("CardCommands", () => {
     const panel = screen.getByRole("region", { name: "Question 9" });
     expect(within(panel).getByText(EFFECT_FAILED.prompt, { exact: false })).toBeVisible();
     const options = within(within(panel).getByRole("list", { name: "Options" })).getAllByRole("button");
-    expect(options.map((option) => option.textContent)).toEqual(["Continue after fixing the causeRecommended", "Stop"]);
+    expect(options).toHaveLength(2);
+    expect(within(options[0]!).getByText("Continue after fixing the cause")).toBeVisible();
+    expect(within(options[0]!).getByText("Recommended")).toBeVisible();
+    expect(within(options[1]!).getByText("Stop")).toBeVisible();
+    expect(within(options[1]!).queryByText("Recommended")).toBeNull();
+    // Each option says what it does in visible text, not only in a tooltip.
+    for (const [index, option] of EFFECT_FAILED.options.entries()) {
+      expect(within(options[index]!).getByText(option.outcome)).toBeVisible();
+      expect(options[index]).not.toHaveAttribute("title");
+    }
     expect(within(panel).getByText(/TL3 recommends “Continue after fixing the cause”/)).toBeVisible();
     await user.click(within(panel).getByRole("button", { name: "Let TL3 decide" }));
     expect(filed[0]!.action).toEqual({ kind: "defer", question: 9 });
@@ -201,5 +210,125 @@ describe("DeferAll", () => {
       { node: 3, action: { kind: "defer", question: 12 } },
     ]);
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("focus", () => {
+  it("moves into the confirmation, and back to the action on cancel or confirm", async () => {
+    const user = userEvent.setup();
+    setup(<CardCommands card={card({ id: 4 })} />);
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    expect(screen.getByRole("button", { name: "Confirm stop" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Stop" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Pause" }));
+    expect(screen.getByRole("button", { name: "Confirm pause" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: "Pause" })).toHaveFocus();
+  });
+
+  it("moves into an option's form, and back to the option on cancel or send", async () => {
+    const user = userEvent.setup();
+    setup(<CardCommands card={card({ id: 4, column: "NeedsRob", question: OUT_OF_CREDIT })} />);
+    const credit = () => screen.getByRole("button", { name: /^Add credit/ });
+    await user.click(credit());
+    expect(screen.getByLabelText("Credit (1–100)")).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(credit()).toHaveFocus();
+    await user.click(credit());
+    await user.keyboard("20{Enter}");
+    expect(screen.queryByLabelText("Credit (1–100)")).toBeNull();
+    expect(credit()).toHaveFocus();
+  });
+});
+
+describe("compact cards", () => {
+  it("keep their actions behind one menu that works from the keyboard", async () => {
+    const user = userEvent.setup();
+    const { filed } = setup(
+      <CardCommands compact card={card({ id: 4, incidents: [{ id: "0.workers.transport", summary: "Checks stalled" }] })} />,
+    );
+    expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+    const menu = screen.getByRole("button", { name: "Actions" });
+    menu.focus();
+    await user.keyboard("{Enter}");
+    const items = screen.getAllByRole("menuitem").map((item) => item.textContent);
+    expect(items).toEqual(["Pause", "Stop", "Restart", "Clear incident 0.workers.transport"]);
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: "Confirm pause" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(menu).toHaveFocus();
+    expect(filed).toEqual([]);
+    await user.keyboard("{Enter}");
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(screen.getByRole("button", { name: "Confirm stop" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(filed.map((command) => command.action)).toEqual([{ kind: "stop" }]);
+    expect(menu).toHaveFocus();
+  });
+});
+
+describe("status", () => {
+  it("mounts the live region empty, then fills it", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <CommandsProvider records={[]} file={async (_node, id) => ({ id, filed: true })}>
+        <CardCommands card={card({ id: 4 })} />
+      </CommandsProvider>,
+    );
+    const live = container.querySelector("[aria-live]");
+    expect(live).not.toBeNull();
+    expect(live).toHaveTextContent("");
+    await user.click(screen.getByRole("button", { name: "Pause" }));
+    await user.click(screen.getByRole("button", { name: "Confirm pause" }));
+    expect(container.querySelector("[aria-live]")).toBe(live);
+    expect(live).toHaveTextContent("Pause: sending");
+  });
+
+  it("shows a request's newest settled outcome from the stream after a reload", () => {
+    setup(<CardCommands card={card({ id: 4 })} />, [
+      record("b", 4, { kind: "stop" }, "refused", "The request is already stopping."),
+      record("a", 4, { kind: "pause" }, "applied"),
+      record("c", 5, { kind: "pause" }, "applied"),
+    ]);
+    expect(screen.getByText("Stop refused: The request is already stopping.")).toBeVisible();
+    expect(screen.queryByText("Pause: applied")).toBeNull();
+  });
+});
+
+describe("bulk defer", () => {
+  const cards = [
+    card({ id: 1, issue: 101, column: "NeedsRob", question: EFFECT_FAILED, title: "Fix the build" }),
+    card({ id: 3, issue: 103, column: "NeedsRob", question: { ...EFFECT_FAILED, id: 12 }, title: "Tidy docs" }),
+  ];
+
+  it("names how many shown questions it covers when the board is filtered", () => {
+    setup(<DeferAll cards={cards} filtered />);
+    expect(screen.getByRole("button", { name: "Let TL3 decide on all shown (2)" })).toBeVisible();
+  });
+
+  it("shows TL3's refusal on a question that was answered meanwhile", async () => {
+    const user = userEvent.setup();
+    const { filed, rerender } = setup(
+      <>
+        <DeferAll cards={cards} />
+        {cards.map((shown) => (
+          <CardCommands key={shown.id} card={shown} />
+        ))}
+      </>,
+    );
+    await user.click(screen.getByRole("button", { name: "Let TL3 decide on all" }));
+    await user.click(screen.getByRole("button", { name: "Apply 2 choices" }));
+    const [first, second] = filed;
+    act(() =>
+      rerender([
+        record(second!.id, 3, second!.action, "refused", "Question 12 was answered meanwhile."),
+        record(first!.id, 1, first!.action, "applied"),
+      ]),
+    );
+    expect(screen.getByText("Let TL3 decide on question 9: applied")).toBeVisible();
+    expect(
+      screen.getByText("Let TL3 decide on question 12 refused: Question 12 was answered meanwhile."),
+    ).toBeVisible();
   });
 });

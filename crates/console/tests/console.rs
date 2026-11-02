@@ -32,6 +32,7 @@ fn main() {
             store: reader.clone(),
             assets: assets.path().into(),
             models: None,
+            public_hosts: vec![],
         },
     )
     .unwrap();
@@ -48,15 +49,21 @@ fn main() {
     println!("test console_reads_through_a_role_that_cannot_write ... ok");
     cards_follow_the_quota_fallback(&settings, assets.path());
     println!("test cards_follow_the_quota_fallback ... ok");
-    a_command_round_trips_to_tl3d_and_back(&settings, assets.path(), &mut controller);
+    let (filer, mut filer_stream, node) =
+        a_command_round_trips_to_tl3d_and_back(&settings, assets.path(), &mut controller);
     println!("test a_command_round_trips_to_tl3d_and_back ... ok");
+    answers_only_to_its_own_host_names(&settings, &filer, node);
+    println!("test answers_only_to_its_own_host_names ... ok");
+    commands_stay_small(&settings, &filer, &mut filer_stream, node);
+    println!("test commands_stay_small ... ok");
+    drop(filer);
     drop(controller);
     builds_once_the_store_is_migrated(&mut database, assets.path());
     println!("test builds_once_the_store_is_migrated ... ok");
     streams_again_after_postgres_restarts(address, &mut database, &settings, records.path());
     println!("test streams_again_after_postgres_restarts ... ok");
     database.stop();
-    println!("9 console scenarios passed; no skips");
+    println!("11 console scenarios passed; no skips");
 }
 
 fn bootstrap() -> Bootstrap {
@@ -348,7 +355,7 @@ impl EventStream {
             .unwrap_or_default();
         write!(
             socket,
-            "GET /api/stream HTTP/1.1\r\nHost: console\r\nAccept: text/event-stream\r\n{resume}\r\n"
+            "GET /api/stream HTTP/1.1\r\nHost: {address}\r\nAccept: text/event-stream\r\n{resume}\r\n"
         )
         .unwrap();
         let mut reader = BufReader::new(socket);
@@ -473,7 +480,7 @@ fn get(address: SocketAddr, path: &str) -> (u16, String, Vec<u8>) {
         .unwrap();
     write!(
         socket,
-        "GET {path} HTTP/1.1\r\nHost: console\r\nConnection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
     )
     .unwrap();
     let mut reader = BufReader::new(socket);
@@ -498,6 +505,7 @@ fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
             store: settings.clone(),
             assets: assets.into(),
             models: None,
+            public_hosts: vec![],
         },
     )
     .unwrap();
@@ -519,6 +527,7 @@ fn cards_follow_the_quota_fallback(settings: &tl3_config::Store, assets: &Path) 
             store: settings.clone(),
             assets: assets.into(),
             models: Some(config.models),
+            public_hosts: vec![],
         },
     )
     .unwrap();
@@ -555,23 +564,42 @@ fn cards_follow_the_quota_fallback(settings: &tl3_config::Store, assets: &Path) 
 }
 
 fn post(address: SocketAddr, path: &str, headers: &str, body: &str) -> (u16, Vec<u8>) {
+    request(
+        address,
+        "POST",
+        path,
+        &address.to_string(),
+        &format!("Content-Type: application/json\r\n{headers}"),
+        body,
+    )
+}
+
+/// One raw HTTP/1.1 request, naming whatever Host the caller likes.
+fn request(
+    address: SocketAddr,
+    method: &str,
+    path: &str,
+    host: &str,
+    headers: &str,
+    body: &str,
+) -> (u16, Vec<u8>) {
     let mut socket = TcpStream::connect(address).unwrap();
     socket
         .set_read_timeout(Some(Duration::from_secs(60)))
         .unwrap();
-    write!(
+    // An oversized body may be refused before it is all read.
+    let _ = write!(
         socket,
-        "POST {path} HTTP/1.1\r\nHost: console\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{headers}\r\n{body}",
+        "{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nContent-Length: {}\r\n{headers}\r\n{body}",
         body.len()
-    )
-    .unwrap();
+    );
     let mut reader = BufReader::new(socket);
     let (status, headers) = response_head(&mut reader);
     let body = if headers.contains("transfer-encoding: chunked") {
         ChunkedBody::new(reader).rest()
     } else {
         let mut body = Vec::new();
-        reader.read_to_end(&mut body).unwrap();
+        let _ = reader.read_to_end(&mut body);
         body
     };
     (status, body)
@@ -584,7 +612,7 @@ fn a_command_round_trips_to_tl3d_and_back(
     settings: &tl3_config::Store,
     assets: &Path,
     controller: &mut Controller,
-) {
+) -> (tl3_console::Running, EventStream, u64) {
     tl3_store::grant_reader(
         settings,
         "tl3_console_filer",
@@ -600,6 +628,7 @@ fn a_command_round_trips_to_tl3d_and_back(
             },
             assets: assets.into(),
             models: None,
+            public_hosts: vec!["console.example.test".into()],
         },
     )
     .unwrap();
@@ -624,7 +653,9 @@ fn a_command_round_trips_to_tl3d_and_back(
     let path = format!("/api/requests/{node}/commands");
     let id = "5c6d7e8f-0000-4000-8000-000000000331";
     let body = format!(r#"{{"id":"{id}","action":{{"kind":"pause"}}}}"#);
-    let own = "X-TL3-Console: 1\r\nOrigin: http://console\r\nSec-Fetch-Site: same-origin\r\n";
+    let own =
+        format!("X-TL3-Console: 1\r\nOrigin: http://{address}\r\nSec-Fetch-Site: same-origin\r\n");
+    let own = own.as_str();
     for (headers, status) in [
         ("", 403),
         ("X-TL3-Console: 1\r\nOrigin: http://evil.example\r\n", 403),
@@ -707,4 +738,117 @@ fn a_command_round_trips_to_tl3d_and_back(
         stream.last_commands.as_ref().unwrap()["commands"][0]["action"],
         serde_json::json!({"kind": "pause"})
     );
+    (console, stream, node)
+}
+
+fn filed(settings: &tl3_config::Store, id: &str) -> bool {
+    raw(settings)
+        .query_opt("SELECT 1 FROM tl3_console_commands WHERE id = $1", &[&id])
+        .unwrap()
+        .is_some()
+}
+
+/// DNS rebinding: a page on another site can point its own name at the
+/// console, so its Origin matches its Host. The console answers only to its
+/// listen address, localhost on loopback, and configured public names.
+fn answers_only_to_its_own_host_names(
+    settings: &tl3_config::Store,
+    console: &tl3_console::Running,
+    node: u64,
+) {
+    let address = console.address();
+    let port = address.port();
+    let own = address.to_string();
+    let localhost = format!("localhost:{port}");
+    let evil = format!("evil.example:{port}");
+    for (host, status) in [
+        (own.as_str(), 200),
+        (localhost.as_str(), 200),
+        ("console.example.test", 200),
+        ("Console.Example.Test", 200),
+        (evil.as_str(), 421),
+        ("evil.example", 421),
+        ("127.0.0.1", 421),
+        ("", 421),
+    ] {
+        assert_eq!(
+            request(address, "GET", "/api/board", host, "", "").0,
+            status,
+            "{host:?}"
+        );
+    }
+    assert_eq!(request(address, "GET", "/", &evil, "", "").0, 421);
+    let id = "5c6d7e8f-0000-4000-8000-000000000332";
+    let headers = format!(
+        "Content-Type: application/json\r\nX-TL3-Console: 1\r\nOrigin: http://{evil}\r\nSec-Fetch-Site: same-origin\r\n"
+    );
+    let body = format!(r#"{{"id":"{id}","action":{{"kind":"stop"}}}}"#);
+    assert_eq!(
+        request(
+            address,
+            "POST",
+            &format!("/api/requests/{node}/commands"),
+            &evil,
+            &headers,
+            &body
+        )
+        .0,
+        421
+    );
+    assert!(!filed(settings, id), "a rebinding page files nothing");
+}
+
+/// Command bodies are small: a few KiB around TL3's 20,000-character cap on
+/// Rob's words. Oversized ones never reach TL3, and the stream doesn't repeat
+/// long texts in every commands event.
+fn commands_stay_small(
+    settings: &tl3_config::Store,
+    console: &tl3_console::Running,
+    stream: &mut EventStream,
+    node: u64,
+) {
+    let address = console.address();
+    let path = format!("/api/requests/{node}/commands");
+    let own =
+        format!("X-TL3-Console: 1\r\nOrigin: http://{address}\r\nSec-Fetch-Site: same-origin\r\n");
+    let comment = |id: &str, chars: usize| {
+        format!(
+            r#"{{"id":"{id}","action":{{"kind":"comment","text":"{}"}}}}"#,
+            "a".repeat(chars)
+        )
+    };
+    let huge = "5c6d7e8f-0000-4000-8000-000000000333";
+    assert_eq!(post(address, &path, &own, &comment(huge, 200_000)).0, 413);
+    assert!(!filed(settings, huge));
+    let over = "5c6d7e8f-0000-4000-8000-000000000334";
+    assert_eq!(post(address, &path, &own, &comment(over, 20_001)).0, 422);
+    let guidance = "5c6d7e8f-0000-4000-8000-000000000336";
+    let long_guidance = format!(
+        r#"{{"id":"{guidance}","action":{{"kind":"answer","question":1,"choice":{{"answer":"try_again","guidance":"{}"}}}}}}"#,
+        "g".repeat(20_001)
+    );
+    assert_eq!(post(address, &path, &own, &long_guidance).0, 422);
+    assert!(!filed(settings, over) && !filed(settings, guidance));
+    let full = "5c6d7e8f-0000-4000-8000-000000000335";
+    assert_eq!(post(address, &path, &own, &comment(full, 20_000)).0, 202);
+    assert!(filed(settings, full));
+    loop {
+        let event = stream.event();
+        if event.name != "commands" {
+            continue;
+        }
+        let Some(shown) = event.data["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|command| command["id"] == full)
+            .cloned()
+        else {
+            continue;
+        };
+        let text = shown["action"]["text"].as_str().unwrap();
+        assert_eq!(text.chars().count(), 201, "{text}");
+        assert!(text.ends_with('…'));
+        break;
+    }
 }

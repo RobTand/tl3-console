@@ -7,6 +7,7 @@
 pub mod api;
 mod commands;
 mod feed;
+mod hosts;
 mod rebuild;
 mod server;
 mod supervise;
@@ -49,6 +50,9 @@ pub struct Options {
     pub assets: PathBuf,
     /// Model ladders, to name each card's model.
     pub models: Option<tl3_config::Models>,
+    /// Host names the console answers to besides its listen address, such as
+    /// the tunnel's public name (#338).
+    pub public_hosts: Vec<String>,
 }
 
 /// A console serving on its own threads.
@@ -94,6 +98,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         store,
         assets,
         models,
+        public_hosts: _,
     } = options;
     let store_for_commands = store.clone();
     {

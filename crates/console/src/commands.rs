@@ -12,6 +12,7 @@ use axum::{
     routing::post,
 };
 use std::sync::{Arc, Mutex};
+use tl3_controller::console::CommandRecord;
 use tl3_store::ConsoleCommands;
 
 /// Browsers never send this header cross-site without a CORS preflight,
@@ -152,9 +153,79 @@ async fn file(
     }
 }
 
+/// Long texts a `commands` event repeats are cut to this many characters.
+pub(crate) const SHOWN_CHARS: usize = 200;
+
+/// The newest commands as the stream shows them: Rob's long words abbreviated.
+pub(crate) fn brief(records: Vec<CommandRecord>) -> Vec<CommandRecord> {
+    records
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tl3_controller::console::{Action, Choice, CommandStatus};
+
+    fn record(action: Action) -> CommandRecord {
+        CommandRecord {
+            id: "x".into(),
+            node: 1,
+            action: Some(action),
+            status: CommandStatus::Pending,
+            reason: None,
+            received_ms: 1,
+            settled_ms: None,
+        }
+    }
+
+    #[test]
+    fn the_stream_abbreviates_long_words() {
+        let long = "é".repeat(20_000);
+        let shown = brief(vec![
+            record(Action::Comment { text: long.clone() }),
+            record(Action::Answer {
+                question: 3,
+                choice: Choice::ChangeRequest { text: long.clone() },
+            }),
+            record(Action::Answer {
+                question: 3,
+                choice: Choice::TryAgain { guidance: long },
+            }),
+            record(Action::Comment {
+                text: "short".into(),
+            }),
+        ]);
+        let expected = format!("{}…", "é".repeat(SHOWN_CHARS));
+        assert_eq!(
+            shown[0].action,
+            Some(Action::Comment {
+                text: expected.clone()
+            })
+        );
+        assert_eq!(
+            shown[1].action,
+            Some(Action::Answer {
+                question: 3,
+                choice: Choice::ChangeRequest {
+                    text: expected.clone()
+                }
+            })
+        );
+        assert_eq!(
+            shown[2].action,
+            Some(Action::Answer {
+                question: 3,
+                choice: Choice::TryAgain { guidance: expected }
+            })
+        );
+        assert_eq!(
+            shown[3].action,
+            Some(Action::Comment {
+                text: "short".into()
+            })
+        );
+    }
+
     use axum::http::HeaderValue;
 
     fn headers(pairs: &[(&'static str, &'static str)]) -> HeaderMap {

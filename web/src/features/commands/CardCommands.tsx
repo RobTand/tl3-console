@@ -201,7 +201,7 @@ export function QuestionPanel({ card, question }: { card: Card; question: CardQu
 }
 
 /** Everything Rob can do from a card, and how his last command settled. */
-export function CardCommands({ card }: { card: Card }) {
+export function CardCommands({ card }: { card: Card; compact?: boolean }) {
   const { run, latest } = useCommands();
   const shown = latest(card.id);
   const tone =

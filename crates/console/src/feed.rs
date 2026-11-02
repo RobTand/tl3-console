@@ -110,6 +110,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn filed_commands_alone_reread_commands_not_the_world() {
+        let tables = |names: &[&str]| names.iter().map(|name| name.to_string()).collect();
+        assert_eq!(change(&tables(&["tl3_worker_progress"])), Change::Progress);
+        assert_eq!(change(&tables(&["tl3_console_commands"])), Change::Commands);
+        assert_eq!(
+            change(&tables(&["tl3_console_commands", "tl3_worker_summary"])),
+            Change::Commands
+        );
+        // tl3d settles commands in its own commits, so a commit rereads them.
+        assert_eq!(
+            change(&tables(&["tl3_meta", "tl3_console_commands"])),
+            Change::World
+        );
+    }
+
+    #[test]
     fn backoff_doubles_to_its_cap_and_resets() {
         let mut backoff = Backoff::new();
         let delays: Vec<_> = (0..9).map(|_| backoff.delay().as_millis()).collect();

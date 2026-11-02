@@ -125,6 +125,7 @@ fn main() {
                     .unwrap()
                     .models,
             ),
+            public_hosts: vec![],
         },
     )
     .unwrap();
