@@ -222,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn links_runs_to_mlflow_traces_and_branches_to_tl3s_repos() {
+    fn links_run_to_the_traces_page_and_tl3s_branches() {
         let settings = Settings::parse(&console(&[]), TL3).unwrap();
         assert_eq!(settings.links.traces, None);
         let traces = "http://192.168.1.107:5033/#/experiments/2/traces";

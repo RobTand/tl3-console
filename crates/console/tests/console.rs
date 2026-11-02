@@ -525,6 +525,7 @@ fn refuses_a_schema_it_does_not_match(database: &mut Database, assets: &Path) {
             store: settings.clone(),
             assets: assets.into(),
             models: None,
+            links: Default::default(),
         },
     )
     .unwrap();
