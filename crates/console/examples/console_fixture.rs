@@ -298,6 +298,7 @@ fn issue(repo: &str, number: u64, title: &str) -> LabelledIssue {
         title: title.into(),
         actor: 24923402,
         label: "tl3".into(),
+        labels: vec![],
     }
 }
 

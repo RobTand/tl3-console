@@ -110,6 +110,7 @@ fn issue(number: u64) -> LabelledIssue {
         title: format!("Console fixture {number}"),
         actor: 24923402,
         label: "tl3".into(),
+        labels: vec![],
     }
 }
 

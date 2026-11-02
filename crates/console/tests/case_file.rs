@@ -146,6 +146,7 @@ fn open(settings: &tl3_config::Store, records: &Path, script: &Rc<RefCell<Script
                 title: title.into(),
                 actor: 24923402,
                 label: "tl3".into(),
+                labels: vec![],
             })
             .unwrap();
     }
