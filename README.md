@@ -162,16 +162,22 @@ nothing hidden reaches the browser:
 
 - the board snapshot, every stream patch and the flow counts leave the
   repository's requests out, and so do Needs Rob and "Let TL3 decide on all";
-- the `commands` stream event leaves out commands filed for its requests;
+- open incidents that name the repository without belonging to a request,
+  which TL3 raises when it fails to read one of its issues, leave the list of
+  incidents without a request;
+- the `commands` stream event leaves out commands filed for its requests,
+  including requests a newer one replaced;
 - the case file (`GET /api/requests/{id}`) and the command route
-  (`POST /api/requests/{id}/commands`) answer `404` for them, as for a
-  request that doesn't exist, and file nothing.
+  (`POST /api/requests/{id}/commands`) answer `404` for its requests and file
+  nothing. The command route checks the request's repository before it reads
+  the body.
 
 An entry that isn't one of TL3's served repositories (`github.repos` in
 `tl3.toml`) fails `tl3-console check` and the console's start with a message
 that names it, so a typo can't quietly hide nothing. Deploy runs `check` before
-it installs. Open incidents that belong to no request carry no repository, so
-they still show. Add the line to the config by hand and restart the console.
+it installs. Incidents that name no repository, such as a failed read of the
+operations repository, still show. Add the line to the config by hand and
+restart the console.
 
 ## Host names
 

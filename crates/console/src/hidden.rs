@@ -1,9 +1,10 @@
 //! Repositories the console never shows (`hide_repos` in its config).
 //!
-//! The board's builder drops a hidden repository's requests before it
-//! projects the board, so the snapshot, every patch and every count already
-//! leave them out. The case file and command routes answer 404 for them, as for
-//! a request that doesn't exist. Nothing is filtered in the browser.
+//! The board's builder drops a hidden repository's requests, and the
+//! input-failure incidents on its issues, before it projects the board, so the
+//! snapshot, every patch and every count already leave them out. The case file
+//! and command routes answer 404 for its requests. Nothing is filtered in the
+//! browser.
 
 use std::collections::BTreeSet;
 use tl3_store::Transaction;
@@ -67,19 +68,54 @@ impl HiddenRepos {
     /// Every request of a hidden repository, including ones a newer request
     /// for the same issue replaced: their commands stay hidden too.
     pub(crate) fn requests(&self, tx: &mut Transaction<'_>) -> tl3_store::Result<BTreeSet<u64>> {
+        Ok(self
+            .rows(tx, "requests", ["repo", "owner"], ["repo", "name"])?
+            .iter()
+            .filter_map(|id| id.parse().ok())
+            .collect())
+    }
+
+    /// Input-failure incidents on a hidden repository's issues. They belong to
+    /// no request, so the board lists them apart, but they name the repository.
+    pub(crate) fn incidents(
+        &self,
+        tx: &mut Transaction<'_>,
+    ) -> tl3_store::Result<BTreeSet<String>> {
+        self.rows(
+            tx,
+            "incidents",
+            ["input_failure", "target", "repository", "owner"],
+            ["input_failure", "target", "repository", "name"],
+        )
+        .map(|ids| ids.into_iter().collect())
+    }
+
+    /// The ids of `table`'s rows whose repository, read at the JSON paths,
+    /// is hidden. GitHub ignores case, so the store's side is lowercased.
+    fn rows<const N: usize>(
+        &self,
+        tx: &mut Transaction<'_>,
+        table: &str,
+        owner: [&str; N],
+        name: [&str; N],
+    ) -> tl3_store::Result<Vec<String>> {
         if self.is_empty() {
-            return Ok(BTreeSet::new());
+            return Ok(Vec::new());
         }
         let names: Vec<&str> = self.0.iter().map(String::as_str).collect();
         Ok(tx
             .query(
-                "SELECT row_id FROM tl3_world WHERE table_name = 'requests'
-                 AND lower((value #>> '{repo,owner}') || '/' || (value #>> '{repo,name}')) = ANY($1)",
-                &[&names.as_slice()],
-            )
-            ?
+                "SELECT row_id FROM tl3_world WHERE table_name = $1
+                 AND lower((value #>> $2::text[]) || '/' || (value #>> $3::text[])) = ANY($4)",
+                &[
+                    &table,
+                    &owner.as_slice(),
+                    &name.as_slice(),
+                    &names.as_slice(),
+                ],
+            )?
             .iter()
-            .filter_map(|row| row.get::<_, String>(0).parse().ok())
+            .map(|row| row.get(0))
             .collect())
     }
 }

@@ -144,6 +144,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
             models,
             hidden,
             hidden_requests: BTreeSet::new(),
+            hidden_incidents: BTreeSet::new(),
             reader: None,
             rows: None,
             commands: None,
@@ -222,6 +223,8 @@ struct Builder {
     hidden: hidden::HiddenRepos,
     /// Node ids of every hidden repository's requests, as of the last full read.
     hidden_requests: BTreeSet<u64>,
+    /// Ids of the input-failure incidents on hidden repositories' issues.
+    hidden_incidents: BTreeSet<String>,
     reader: Option<Session>,
     rows: Option<Rows>,
     /// The newest commands as last read; a progress tick keeps them.
@@ -259,8 +262,11 @@ impl Builder {
                 let mut rows = Rows::read(&mut tx)?;
                 // Dropped before projecting, so the counts leave them out too.
                 self.hidden_requests = self.hidden.requests(&mut tx)?;
+                self.hidden_incidents = self.hidden.incidents(&mut tx)?;
                 rows.requests
                     .retain(|request| !self.hidden_requests.contains(&request.id.0));
+                rows.unassigned_incidents
+                    .retain(|incident| !self.hidden_incidents.contains(&incident.id));
                 rows
             }
         };
