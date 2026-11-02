@@ -30,8 +30,7 @@ const RETRY: Duration = Duration::from_secs(1);
 pub(crate) fn router(
     published: watch::Receiver<Published>,
     assets: &Path,
-    commands: Router,
-    hosts: crate::hosts::Hosts,
+    case_files: Router,
 ) -> Router {
     let app = ServeDir::new(assets).fallback(ServeFile::new(assets.join("index.html")));
     Router::new()
@@ -40,11 +39,7 @@ pub(crate) fn router(
         .route("/api/{*rest}", get(not_found))
         .fallback_service(app)
         .with_state(published)
-        .merge(commands)
-        .layer(axum::middleware::from_fn_with_state(
-            hosts,
-            crate::hosts::guard,
-        ))
+        .merge(case_files)
         .layer(SetResponseHeaderLayer::overriding(
             header::CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(CSP),

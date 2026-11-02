@@ -15,6 +15,7 @@ export function BoardColumn(props: {
   cards: Card[];
   now: number;
   note?: string;
+  onOpen?: (id: number) => void;
   /** Shown in the column's heading. */
   action?: ReactNode;
   /** Shown at the foot of each card. */
@@ -42,7 +43,7 @@ export function BoardColumn(props: {
           </p>
         ) : (
           ordered(props.column, props.cards).map((card) => (
-            <BoardCard key={card.id} card={card} now={props.now}>
+            <BoardCard key={card.id} card={card} now={props.now} {...(props.onOpen ? { onOpen: props.onOpen } : {})}>
               {props.cardExtras?.(card)}
             </BoardCard>
           ))

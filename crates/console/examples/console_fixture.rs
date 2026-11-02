@@ -4,20 +4,26 @@
 //! Prints `{"url": ...}` once serving. Each `advance` line on stdin drives the
 //! controller until request #42 changes column and prints `{"column": ...}`.
 //! Each `apply` line applies the console commands filed so far, as tl3d does
-//! when the console wakes it, and prints `{"applied": true}`. Request #43
-//! waits in Needs Rob with a question. Closing stdin stops Postgres and exits.
+//! when the console wakes it, and prints `{"applied": true}`. Closing stdin
+//! stops Postgres and exits.
+//!
+//! Scripted workers give two requests a story for the case file: the kernel
+//! cache request's maker is blocked twice, Rob clears the incident, and its
+//! first review asks for changes; the FP8 request's planner can't meet it.
+//! Request #43's first run fails for good, so it waits in Needs Rob with a
+//! question TL3 can decide alone.
 
 #[path = "../tests/support/mod.rs"]
 mod support;
 
 use serde_json::json;
-use std::{io::BufRead, net::TcpListener, path::PathBuf};
+use std::{collections::BTreeMap, io::BufRead, net::TcpListener, path::PathBuf};
 use tl3_controller::{
     Bootstrap, Controller, LabelledIssue, Repository, adapters,
     board::{self, Column},
-    executor::{Completion, Delivery, Executor, Look, Observation, Reconciliation, Upstream},
+    executor::{Completion, Delivery, Executor, Observation, Output, Reconciliation, Upstream},
 };
-use tl3_kernel::{Command, Event, NodeId};
+use tl3_kernel::{Command, EffectKind, Event, Fact, NodeId, Reply, Role};
 use tl3_store::{Reader, Store};
 
 const REPOS: [&str; 4] = ["tl3-sandbox", "prismabuild", "prismaquant", "tessera"];
@@ -31,7 +37,7 @@ const SEED: [(&str, Column); 8] = [
     ("Retry Hindsight writes after a 429", Column::Done),
     (
         "Quantize attention layers to FP8 with calibration",
-        Column::Merging,
+        Column::NeedsRob,
     ),
     ("Fix tile seams at zoom level 14", Column::Reviewing),
     ("Document the merge-queue batching rules", Column::Checking),
@@ -49,6 +55,70 @@ const SEED: [(&str, Column); 8] = [
     ),
 ];
 
+/// The seeded requests the scripted workers tell a story for, by node.
+const NEEDS_ROB: u64 = 2;
+const FIX_ROUND: u64 = 5;
+/// The issue whose effect-failed question Rob can leave to TL3.
+const DEFERRABLE: u64 = 43;
+
+/// The simulated workers, with scripted replies for two seeded requests.
+struct Workers {
+    fake: adapters::workers::Fake,
+    runs: BTreeMap<(u64, &'static str), u32>,
+}
+
+impl Executor for Workers {
+    fn execute(&mut self, delivery: &Delivery) -> tl3_controller::Result<Completion> {
+        if delivery.issue == DEFERRABLE {
+            return Ok(Completion::permanent("fixture"));
+        }
+        let Output::Effect {
+            kind: EffectKind::StartRun(role),
+            node,
+            ..
+        } = delivery.output
+        else {
+            return self.fake.execute(delivery);
+        };
+        let generation = delivery.generation;
+        let name = match role {
+            Role::Make => "maker",
+            Role::Review => "reviewer",
+            Role::Plan => "planner",
+            _ => return self.fake.execute(delivery),
+        };
+        let run = self.runs.entry((node.0, name)).or_default();
+        *run += 1;
+        let observation = match (node.0, role, *run) {
+            (FIX_ROUND, Role::Make, 1 | 2) => Observation::WorkerReply {
+                node,
+                generation,
+                role: "maker".into(),
+                reply: json!({"kind": "blocked",
+                    "evidence": {"tool_error": "tool-error-1", "tool": "write", "class": "EROFS"},
+                    "report": "The kernel cache directory is mounted read-only, so the cache index could not be written."}),
+                model: Some("default-model".into()),
+            },
+            (FIX_ROUND, Role::Review, 1) => Observation::Kernel(Event::Reply {
+                node,
+                generation,
+                reply: Reply::ChangesRequested,
+            }),
+            (NEEDS_ROB, Role::Plan, _) => Observation::Kernel(Event::Reply {
+                node,
+                generation,
+                reply: Reply::PlanCantMeet,
+            }),
+            _ => return self.fake.execute(delivery),
+        };
+        Ok(Completion::confirmed(vec![observation]))
+    }
+
+    fn reconcile(&mut self, delivery: &Delivery) -> tl3_controller::Result<Reconciliation> {
+        self.fake.reconcile(delivery)
+    }
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let assets = match (args.next().as_deref(), args.next()) {
@@ -58,14 +128,19 @@ fn main() {
     let mut database = support::Database::start();
     let settings = database.create("console_fixture");
     let records = tempfile::tempdir().unwrap();
-    let mut registry = adapters::simulation(records.path()).unwrap();
-    registry.register(
-        Upstream::Workers,
-        NeedsRob(adapters::workers::Fake::new(records.path())),
-    );
     let mut controller = Controller::open(
         Store::open(&settings).unwrap(),
-        registry,
+        {
+            let mut registry = adapters::simulation(records.path()).unwrap();
+            registry.register(
+                Upstream::Workers,
+                Workers {
+                    fake: adapters::workers::Fake::new(records.path()),
+                    runs: BTreeMap::new(),
+                },
+            );
+            registry
+        },
         Bootstrap {
             operations: None,
             repos: REPOS
@@ -85,7 +160,29 @@ fn main() {
     for (index, (title, target)) in SEED.into_iter().enumerate() {
         let (repo, number) = (REPOS[index % REPOS.len()], 100 + index as u64);
         controller.intake(issue(repo, number, title)).unwrap();
-        while column(&settings, repo, number) < target && controller.drive_once().unwrap() {}
+        loop {
+            let node = controller.world().unwrap().nodes[index];
+            if node.waiting_incident {
+                // Rob clears the incident the second blocked maker run raised.
+                controller
+                    .observe(
+                        &format!("fixture-clear-{index}"),
+                        Observation::Kernel(Event::Fact {
+                            node: NodeId(index as u64),
+                            fact: Fact::IncidentCleared { by_rob: true },
+                        }),
+                    )
+                    .unwrap();
+            }
+            let done = if index as u64 == FIX_ROUND {
+                node.round >= 1 && Column::of(node.phase) == Column::Making
+            } else {
+                column(&settings, repo, number) >= target
+            };
+            if done || !controller.drive_once().unwrap() {
+                break;
+            }
+        }
     }
     for (node, command) in [(NodeId(5), Command::Pause), (NodeId(4), Command::Stop)] {
         let event = Event::Command {
@@ -101,11 +198,11 @@ fn main() {
     controller
         .intake(issue(
             "tl3-sandbox",
-            43,
+            DEFERRABLE,
             "Mirror the wheel cache to the Sparks",
         ))
         .unwrap();
-    while column(&settings, "tl3-sandbox", 43) != Column::NeedsRob
+    while column(&settings, "tl3-sandbox", DEFERRABLE) != Column::NeedsRob
         && controller.drive_once().unwrap()
     {}
     controller
@@ -115,17 +212,26 @@ fn main() {
             "Add a live board to the operator console",
         ))
         .unwrap();
+    let config =
+        tl3_config::Config::parse(include_str!("../tests/fixtures/tl3-example.toml")).unwrap();
+    let repos: Vec<_> = REPOS
+        .iter()
+        .map(|name| tl3_config::Repository {
+            name: (*name).into(),
+            ..config.github.repos[0].clone()
+        })
+        .collect();
     let console = tl3_console::start(
         TcpListener::bind("127.0.0.1:0").unwrap(),
         tl3_console::Options {
             store: settings.clone(),
             assets,
-            models: Some(
-                tl3_config::Config::parse(include_str!("../tests/fixtures/tl3-example.toml"))
-                    .unwrap()
-                    .models,
-            ),
-            public_hosts: vec![],
+            links: tl3_console::case_file::Links::new(
+                Some("http://192.168.1.107:5033/#/experiments/2/traces"),
+                &repos,
+            )
+            .unwrap(),
+            models: Some(config.models),
         },
     )
     .unwrap();
@@ -179,23 +285,4 @@ fn column(settings: &tl3_config::Store, repo: &str, issue: u64) -> Column {
         .find(|card| card.issue == issue && card.repo == repo)
         .map(|card| card.column)
         .unwrap()
-}
-
-/// The simulated workers, except that request #43's first run fails for good,
-/// so it waits in Needs Rob with a question.
-struct NeedsRob(adapters::workers::Fake);
-
-impl Executor for NeedsRob {
-    fn execute(&mut self, delivery: &Delivery) -> tl3_controller::Result<Completion> {
-        if delivery.issue == 43 {
-            return Ok(Completion::permanent("fixture"));
-        }
-        self.0.execute(delivery)
-    }
-    fn reconcile(&mut self, delivery: &Delivery) -> tl3_controller::Result<Reconciliation> {
-        self.0.reconcile(delivery)
-    }
-    fn look(&mut self, delivery: &Delivery) -> tl3_controller::Result<Look> {
-        self.0.look(delivery)
-    }
 }

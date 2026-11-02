@@ -32,7 +32,7 @@ fn main() {
             store: reader.clone(),
             assets: assets.path().into(),
             models: None,
-            public_hosts: vec![],
+            links: Default::default(),
         },
     )
     .unwrap();
@@ -52,18 +52,28 @@ fn main() {
     let (filer, mut filer_stream, node) =
         a_command_round_trips_to_tl3d_and_back(&settings, assets.path(), &mut controller);
     println!("test a_command_round_trips_to_tl3d_and_back ... ok");
-    answers_only_to_its_own_host_names(&settings, &filer, node);
-    println!("test answers_only_to_its_own_host_names ... ok");
     commands_stay_small(&settings, &filer, &mut filer_stream, node);
     println!("test commands_stay_small ... ok");
+    store_refusals_say_why(&settings, &filer, node);
+    println!("test store_refusals_say_why ... ok");
     drop(filer);
     drop(controller);
     builds_once_the_store_is_migrated(&mut database, assets.path());
     println!("test builds_once_the_store_is_migrated ... ok");
+    accepts_an_equal_schema(&mut database);
+    println!("test accepts_an_equal_schema ... ok");
+    pinned_migrations_match_the_pinned_tl3(&mut database);
+    println!("test pinned_migrations_match_the_pinned_tl3 ... ok");
+    accepts_a_newer_schema_with_a_warning(&mut database, assets.path());
+    println!("test accepts_a_newer_schema_with_a_warning ... ok");
+    refuses_an_older_schema(&mut database, assets.path());
+    println!("test refuses_an_older_schema ... ok");
+    refuses_a_conflicting_schema(&mut database, assets.path());
+    println!("test refuses_a_conflicting_schema ... ok");
     streams_again_after_postgres_restarts(address, &mut database, &settings, records.path());
     println!("test streams_again_after_postgres_restarts ... ok");
     database.stop();
-    println!("11 console scenarios passed; no skips");
+    println!("16 console scenarios passed; no skips");
 }
 
 fn bootstrap() -> Bootstrap {
@@ -355,7 +365,7 @@ impl EventStream {
             .unwrap_or_default();
         write!(
             socket,
-            "GET /api/stream HTTP/1.1\r\nHost: {address}\r\nAccept: text/event-stream\r\n{resume}\r\n"
+            "GET /api/stream HTTP/1.1\r\nHost: console\r\nAccept: text/event-stream\r\n{resume}\r\n"
         )
         .unwrap();
         let mut reader = BufReader::new(socket);
@@ -480,7 +490,7 @@ fn get(address: SocketAddr, path: &str) -> (u16, String, Vec<u8>) {
         .unwrap();
     write!(
         socket,
-        "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: console\r\nConnection: close\r\n\r\n"
     )
     .unwrap();
     let mut reader = BufReader::new(socket);
@@ -505,7 +515,7 @@ fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
             store: settings.clone(),
             assets: assets.into(),
             models: None,
-            public_hosts: vec![],
+            links: Default::default(),
         },
     )
     .unwrap();
@@ -515,6 +525,147 @@ fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
     assert_eq!(event.name, "snapshot");
     assert_eq!(event.data["revision"], 0);
     assert_eq!(event.data["cards"], serde_json::json!([]));
+}
+
+/// The highest migration the pinned TL3 applies to a store it opens.
+fn pinned_version(settings: &tl3_config::Store) -> i32 {
+    raw(settings)
+        .query_one("SELECT MAX(version) FROM tl3_schema_migrations", &[])
+        .unwrap()
+        .get(0)
+}
+
+fn add_migration(settings: &tl3_config::Store, version: i32) {
+    raw(settings)
+        .execute(
+            "INSERT INTO tl3_schema_migrations VALUES ($1, 'SELECT 1')",
+            &[&version],
+        )
+        .unwrap();
+}
+
+fn start_console(settings: &tl3_config::Store, assets: &Path) -> tl3_console::Running {
+    tl3_console::start(
+        TcpListener::bind("127.0.0.1:0").unwrap(),
+        tl3_console::Options {
+            store: settings.clone(),
+            assets: assets.into(),
+            models: None,
+            links: Default::default(),
+        },
+    )
+    .unwrap()
+}
+
+/// A store the pinned TL3 migrated passes the deploy's check with nothing to
+/// warn about.
+fn accepts_an_equal_schema(database: &mut Database) {
+    let settings = database.create("console_equal_schema");
+    drop(Store::open(&settings).unwrap());
+    assert_eq!(tl3_console::check(&settings).unwrap(), Vec::<i32>::new());
+}
+
+/// `migrations.pin` is what lets the console tell a newer store from a
+/// conflicting one, so it must be what the pinned TL3 really applies.
+fn pinned_migrations_match_the_pinned_tl3(database: &mut Database) {
+    let settings = database.create("console_pinned_migrations");
+    drop(Store::open(&settings).unwrap());
+    let applied: Vec<(i32, String)> = raw(&settings)
+        .query(
+            "SELECT version, md5(sql) FROM tl3_schema_migrations ORDER BY version",
+            &[],
+        )
+        .unwrap()
+        .iter()
+        .map(|row| (row.get(0), row.get(1)))
+        .collect();
+    let lines: String = applied
+        .iter()
+        .map(|(version, md5)| format!("{version} {md5}\n"))
+        .collect();
+    assert_eq!(
+        tl3_console::schema::pinned_migrations(),
+        applied,
+        "update crates/console/migrations.pin to:\n{lines}"
+    );
+}
+
+/// A TL3 deploy that migrates past the pinned commit: the deploy's check and
+/// the board keep working, and the log says which versions are extra.
+fn accepts_a_newer_schema_with_a_warning(database: &mut Database, assets: &Path) {
+    let settings = database.create("console_newer_schema");
+    drop(Store::open(&settings).unwrap());
+    let next = pinned_version(&settings) + 1;
+    add_migration(&settings, next);
+    add_migration(&settings, next + 1);
+    let extra = tl3_console::check(&settings).unwrap();
+    assert_eq!(extra, [next, next + 1]);
+    let warning = tl3_console::schema::warning(&extra);
+    assert!(
+        warning.contains(&next.to_string()) && warning.contains(&(next + 1).to_string()),
+        "{warning}"
+    );
+    assert!(warning.contains("pin"), "{warning}");
+    let console = start_console(&settings, assets);
+    let mut stream = EventStream::open_with_guard(console.address(), None, Duration::from_secs(20));
+    assert_eq!(stream.board_event().name, "snapshot");
+    assert_eq!(get(console.address(), "/api/board").0, 200);
+}
+
+/// A store behind the pinned TL3 lacks tables the board reads.
+fn refuses_an_older_schema(database: &mut Database, assets: &Path) {
+    let settings = database.create("console_older_schema");
+    drop(Store::open(&settings).unwrap());
+    let pinned = pinned_version(&settings);
+    let sql: String = raw(&settings)
+        .query_one(
+            "DELETE FROM tl3_schema_migrations WHERE version = $1 RETURNING sql",
+            &[&pinned],
+        )
+        .unwrap()
+        .get(0);
+    let error = tl3_console::check(&settings).unwrap_err().to_string();
+    assert!(
+        error.contains(&format!("schema version {}", pinned - 1)),
+        "{error}"
+    );
+    let console = start_console(&settings, assets);
+    assert_eq!(get(console.address(), "/api/board").0, 503);
+    let mut stream = EventStream::open_with_guard(console.address(), None, Duration::from_secs(20));
+    raw(&settings)
+        .execute(
+            "INSERT INTO tl3_schema_migrations VALUES ($1, $2)",
+            &[&pinned, &sql],
+        )
+        .unwrap();
+    assert_eq!(stream.board_event().name, "snapshot");
+}
+
+/// A newer store that disagrees with the pin about a version both know is not
+/// the pinned TL3's schema plus additions.
+fn refuses_a_conflicting_schema(database: &mut Database, assets: &Path) {
+    let settings = database.create("console_conflicting_schema");
+    drop(Store::open(&settings).unwrap());
+    add_migration(&settings, pinned_version(&settings) + 1);
+    raw(&settings)
+        .execute(
+            "UPDATE tl3_schema_migrations SET sql = 'changed' WHERE version = 1",
+            &[],
+        )
+        .unwrap();
+    let error = tl3_console::check(&settings).unwrap_err().to_string();
+    assert!(error.contains("migration"), "{error}");
+    let console = start_console(&settings, assets);
+    assert_eq!(get(console.address(), "/api/board").0, 503);
+    drop(console);
+    // A pinned version missing from a newer store is a conflict too.
+    let settings = database.create("console_missing_migration");
+    drop(Store::open(&settings).unwrap());
+    add_migration(&settings, pinned_version(&settings) + 1);
+    raw(&settings)
+        .execute("DELETE FROM tl3_schema_migrations WHERE version = 3", &[])
+        .unwrap();
+    assert!(tl3_console::check(&settings).is_err());
 }
 
 /// Q53: when the maker's model reports quota, the card names the fallback the
@@ -527,7 +678,7 @@ fn cards_follow_the_quota_fallback(settings: &tl3_config::Store, assets: &Path) 
             store: settings.clone(),
             assets: assets.into(),
             models: Some(config.models),
-            public_hosts: vec![],
+            links: Default::default(),
         },
     )
     .unwrap();
@@ -628,7 +779,7 @@ fn a_command_round_trips_to_tl3d_and_back(
             },
             assets: assets.into(),
             models: None,
-            public_hosts: vec!["console.example.test".into()],
+            links: Default::default(),
         },
     )
     .unwrap();
@@ -748,56 +899,6 @@ fn filed(settings: &tl3_config::Store, id: &str) -> bool {
         .is_some()
 }
 
-/// DNS rebinding: a page on another site can point its own name at the
-/// console, so its Origin matches its Host. The console answers only to its
-/// listen address, localhost on loopback, and configured public names.
-fn answers_only_to_its_own_host_names(
-    settings: &tl3_config::Store,
-    console: &tl3_console::Running,
-    node: u64,
-) {
-    let address = console.address();
-    let port = address.port();
-    let own = address.to_string();
-    let localhost = format!("localhost:{port}");
-    let evil = format!("evil.example:{port}");
-    for (host, status) in [
-        (own.as_str(), 200),
-        (localhost.as_str(), 200),
-        ("console.example.test", 200),
-        ("Console.Example.Test", 200),
-        (evil.as_str(), 421),
-        ("evil.example", 421),
-        ("127.0.0.1", 421),
-        ("", 421),
-    ] {
-        assert_eq!(
-            request(address, "GET", "/api/board", host, "", "").0,
-            status,
-            "{host:?}"
-        );
-    }
-    assert_eq!(request(address, "GET", "/", &evil, "", "").0, 421);
-    let id = "5c6d7e8f-0000-4000-8000-000000000332";
-    let headers = format!(
-        "Content-Type: application/json\r\nX-TL3-Console: 1\r\nOrigin: http://{evil}\r\nSec-Fetch-Site: same-origin\r\n"
-    );
-    let body = format!(r#"{{"id":"{id}","action":{{"kind":"stop"}}}}"#);
-    assert_eq!(
-        request(
-            address,
-            "POST",
-            &format!("/api/requests/{node}/commands"),
-            &evil,
-            &headers,
-            &body
-        )
-        .0,
-        421
-    );
-    assert!(!filed(settings, id), "a rebinding page files nothing");
-}
-
 /// Command bodies are small: a few KiB around TL3's 20,000-character cap on
 /// Rob's words. Oversized ones never reach TL3, and the stream doesn't repeat
 /// long texts in every commands event.
@@ -851,4 +952,46 @@ fn commands_stay_small(
         assert!(text.ends_with('…'));
         break;
     }
+}
+
+/// The store's own caps on a command come back as HTTP answers that say
+/// which: a command over 64 KiB once stored, and a backlog tl3d isn't draining.
+fn store_refusals_say_why(settings: &tl3_config::Store, console: &tl3_console::Running, node: u64) {
+    let address = console.address();
+    let path = format!("/api/requests/{node}/commands");
+    let own = format!(
+        "X-TL3-Console: 1\r\nOrigin: http://{address}\r\nSec-Fetch-Site: same-origin\r\n"
+    );
+    // 20,000 characters pass the console's cap, but four bytes each is over the store's.
+    let wide = "5c6d7e8f-0000-4000-8000-000000000337";
+    let body = format!(
+        r#"{{"id":"{wide}","action":{{"kind":"comment","text":"{}"}}}}"#,
+        "\u{1d11e}".repeat(20_000)
+    );
+    let (status, reply) = post(address, &path, &own, &body);
+    assert_eq!(status, 413, "{}", String::from_utf8_lossy(&reply));
+    assert_eq!(
+        String::from_utf8(reply).unwrap(),
+        "This command is over 64 KiB once stored; shorten your words.\n"
+    );
+    assert!(!filed(settings, wide));
+    let mut owner = raw(settings);
+    owner
+        .batch_execute(
+            "INSERT INTO tl3_console_commands (id, node_id, action)
+             SELECT 'backlog-' || n, 0, '{\"kind\":\"pause\"}' FROM generate_series(1, 1000) n",
+        )
+        .unwrap();
+    let late = "5c6d7e8f-0000-4000-8000-000000000338";
+    let body = format!(r#"{{"id":"{late}","action":{{"kind":"pause"}}}}"#);
+    let (status, reply) = post(address, &path, &own, &body);
+    assert_eq!(status, 429, "{}", String::from_utf8_lossy(&reply));
+    assert_eq!(
+        String::from_utf8(reply).unwrap(),
+        "1,000 commands are waiting for TL3 to apply them; try again once it catches up.\n"
+    );
+    assert!(!filed(settings, late));
+    owner
+        .batch_execute("DELETE FROM tl3_console_commands WHERE id LIKE 'backlog-%'")
+        .unwrap();
 }
