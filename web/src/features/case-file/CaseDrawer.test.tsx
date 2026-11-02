@@ -38,7 +38,7 @@ describe("CaseFileView", () => {
     const counters = section("Counters");
     for (const [term, value] of [
       ["Attempt", "2"],
-      ["Fix round", "3"],
+      ["Fix rounds", "2"],
       ["Plan retries", "1"],
       ["Audit rounds", "2"],
       ["Run failures", "4"],

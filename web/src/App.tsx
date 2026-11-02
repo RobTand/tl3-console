@@ -4,6 +4,8 @@ import { useLiveBoard } from "./api/live";
 import { BoardColumn } from "./components/BoardColumn";
 import { FlowStrip } from "./components/FlowStrip";
 import { Status } from "./components/Status";
+import { CaseDrawer } from "./features/case-file/CaseDrawer";
+import { useOpenRequest } from "./features/case-file/live";
 import { filterCards } from "./filter";
 import { useTheme, type Theme } from "./theme";
 import { useNow } from "./time";
@@ -76,6 +78,7 @@ function ThemeSwitch() {
 export function App() {
   const { board, connection } = useLiveBoard();
   const now = useNow();
+  const request = useOpenRequest();
   const [repo, setRepo] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const repos = useMemo(() => [...new Set(board?.cards.map((card) => card.repo))].sort(), [board]);
@@ -128,6 +131,7 @@ export function App() {
                   label={column.label}
                   now={now}
                   cards={cards.filter((card) => card.column === column.column)}
+                  onOpen={request.open}
                   {...(older > 0 ? { note: `${older} older ${older === 1 ? "ending" : "endings"} not shown` } : {})}
                 />
               );
@@ -139,6 +143,12 @@ export function App() {
           Waiting for the console's first snapshot…
         </main>
       )}
+      <CaseDrawer
+        id={request.id}
+        card={board?.cards.find((card) => card.id === request.id)}
+        now={now}
+        onClose={request.close}
+      />
     </div>
   );
 }

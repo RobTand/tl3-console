@@ -37,7 +37,7 @@ function Chip(props: { tone: string; title: string; children: string }) {
   );
 }
 
-export function BoardCard({ card, now }: { card: Card; now: number; onOpen?: (id: number) => void }) {
+export function BoardCard({ card, now, onOpen }: { card: Card; now: number; onOpen?: (id: number) => void }) {
   const [owner, name] = card.repo.split("/");
   const retries =
     card.retries.plan + card.retries.audit + card.retries.run_failures + card.retries.effect_failures;
@@ -62,7 +62,20 @@ export function BoardCard({ card, now }: { card: Card; now: number; onOpen?: (id
           {card.phase_since_ms === null ? "–" : elapsed(now - card.phase_since_ms)}
         </span>
       </header>
-      <h3 className="mt-1 line-clamp-2 text-sm font-medium text-text">{card.title}</h3>
+      <h3 className="mt-1 line-clamp-2 text-sm font-medium text-text">
+        <a
+          href={`?request=${card.id}`}
+          onClick={(event) => {
+            // Modified clicks keep the browser's own behaviour, such as a new tab.
+            if (!onOpen || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            onOpen(card.id);
+          }}
+          className="hover:underline focus-visible:underline"
+        >
+          {card.title}
+        </a>
+      </h3>
       <p className="mt-1.5 text-xs text-text">{card.phase}</p>
       {card.waiting_on !== "none" && (
         <p className="truncate text-xs text-muted" title={`Waiting on ${card.waiting_on}`}>
