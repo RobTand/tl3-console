@@ -7,6 +7,7 @@
 //! password_file = "/home/rob/.config/tl3/secrets/console-postgres-password"
 //! tl3_config = "/home/rob/.config/tl3/tl3.toml"
 //! traces = "http://192.168.1.107:5033/#/experiments/2/traces"
+//! public_hosts = ["console.example.test"]
 //! ```
 //!
 //! The console reads `tl3.toml` with the pinned TL3's own parser, and keeps
@@ -33,6 +34,10 @@ pub struct File {
     /// each worker run to its traces there; without it, runs have no link.
     #[serde(default)]
     pub traces: Option<String>,
+    /// Host names the console answers to besides `listen`, such as a tunnel's
+    /// public name. A request for any other Host is refused.
+    #[serde(default)]
+    pub public_hosts: Vec<String>,
 }
 
 /// What the console runs with.
@@ -44,6 +49,8 @@ pub struct Settings {
     pub models: tl3_config::Models,
     /// Where the case file's links point.
     pub links: crate::case_file::Links,
+    /// Host names the console answers to besides `listen`.
+    pub public_hosts: Vec<String>,
 }
 
 impl Settings {
@@ -70,6 +77,7 @@ impl Settings {
             },
             links: crate::case_file::Links::new(file.traces.as_deref(), &tl3.github.repos)?,
             models: tl3.models,
+            public_hosts: file.public_hosts,
         })
     }
 }
@@ -94,6 +102,13 @@ impl File {
             if !path.is_absolute() {
                 return Err(invalid(field, "use an absolute path"));
             }
+        }
+        if !file
+            .public_hosts
+            .iter()
+            .all(|name| crate::hosts::valid_name(name))
+        {
+            return Err(invalid("public_hosts", crate::hosts::NAME_RULE));
         }
         // TL3's `tl3-deploy console-role` names this role in GRANT statements.
         if !file
@@ -181,6 +196,29 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains(named), "{fields:?}: {error}");
+    }
+
+    #[test]
+    fn public_hosts_are_host_names() {
+        let settings = Settings::parse(&console(&[]), TL3).unwrap();
+        assert!(settings.public_hosts.is_empty());
+        let settings = Settings::parse(
+            &console(&[(
+                "public_hosts",
+                "[\"console.example.test\", \"10.0.0.7:8034\"]",
+            )]),
+            TL3,
+        )
+        .unwrap();
+        assert_eq!(
+            settings.public_hosts,
+            ["console.example.test", "10.0.0.7:8034"]
+        );
+        rejects(
+            &[("public_hosts", "[\"http://console.example.test\"]")],
+            "public_hosts",
+        );
+        rejects(&[("public_hosts", "[\"\"]")], "public_hosts");
     }
 
     #[test]

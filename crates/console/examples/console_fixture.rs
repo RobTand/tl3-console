@@ -213,6 +213,7 @@ fn main() {
             )
             .unwrap(),
             models: Some(config.models),
+            public_hosts: vec![],
         },
     )
     .unwrap();
