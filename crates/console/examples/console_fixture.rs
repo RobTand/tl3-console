@@ -221,6 +221,7 @@ fn main() {
             ..config.github.repos[0].clone()
         })
         .collect();
+    seed_prompts(&settings);
     let console = tl3_console::start(
         TcpListener::bind("127.0.0.1:0").unwrap(),
         tl3_console::Options {
@@ -261,6 +262,32 @@ fn main() {
     database.stop();
 }
 
+/// The built-in prompts, as tl3d seeds them, and a reviewer prompt Rob edited
+/// before a deploy shipped a new built-in one.
+fn seed_prompts(settings: &tl3_config::Store) {
+    let mut store = Store::open(settings).unwrap();
+    tl3_controller::prompts::seed(&mut store).unwrap();
+    let mut prompts = tl3_store::Prompts::open(settings).unwrap();
+    let reviewer = prompts.role("reviewer").unwrap().unwrap();
+    let shipped = reviewer.active.body.clone();
+    prompts
+        .save(
+            "reviewer",
+            &format!("{shipped}\nBefore anything else, check that each new test fails without the change.\n"),
+            "Ask reviewers to check that new tests fail first.",
+            "Rob",
+            reviewer.active.id,
+        )
+        .unwrap()
+        .unwrap();
+    store
+        .seed_prompts(&[(
+            "reviewer",
+            &format!("{shipped}\nName the file and line of every finding.\n"),
+        )])
+        .unwrap();
+}
+
 fn issue(repo: &str, number: u64, title: &str) -> LabelledIssue {
     LabelledIssue {
         delivery: format!("fixture-{repo}-{number}"),
@@ -271,6 +298,7 @@ fn issue(repo: &str, number: u64, title: &str) -> LabelledIssue {
         title: title.into(),
         actor: 24923402,
         label: "tl3".into(),
+        labels: vec![],
     }
 }
 

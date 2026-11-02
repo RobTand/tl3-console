@@ -31,6 +31,7 @@ pub(crate) fn router(
     published: watch::Receiver<Published>,
     assets: &Path,
     case_files: Router,
+    store: tl3_config::Store,
     hosts: crate::hosts::Hosts,
 ) -> Router {
     let files = ServeDir::new(assets).fallback(ServeFile::new(assets.join("index.html")));
@@ -40,7 +41,8 @@ pub(crate) fn router(
         .route("/api/{*rest}", get(not_found))
         .fallback_service(files)
         .with_state(published)
-        .merge(case_files);
+        .merge(case_files)
+        .merge(crate::prompts::routes(store));
     harden(app, hosts)
         .layer(SetResponseHeaderLayer::overriding(
             header::CONTENT_SECURITY_POLICY,
