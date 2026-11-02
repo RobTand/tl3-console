@@ -130,14 +130,14 @@ describe("CardCommands", () => {
     expect(screen.getByText("Resume refused: The request isn't paused.")).toBeVisible();
   });
 
-  it("offers only restart on a stopped request", () => {
+  it("offers restart and postmortem on a stopped request", () => {
     setup(<CardCommands card={card({ id: 4, column: "Done", ending: "Stopped" })} />);
-    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Restart"]);
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Restart", "Write postmortem"]);
   });
 
-  it("offers nothing on a merged request", () => {
+  it("offers a postmortem on a merged request", () => {
     setup(<CardCommands card={card({ id: 5, column: "Done", ending: "Merged" })} />);
-    expect(screen.queryAllByRole("button")).toEqual([]);
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Write postmortem"]);
   });
 
   it("clears an incident", async () => {

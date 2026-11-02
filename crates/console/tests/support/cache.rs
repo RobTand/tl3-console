@@ -1,3 +1,4 @@
+// Copied from RobTand/trustladderiii crates/store/tests/support/cache.rs at d8b561f50a3559f08cb8c9c961e587e58b302158.
 use super::scratch::owned_metadata;
 use postgresql_embedded::{PostgreSQL, Settings};
 use std::{
