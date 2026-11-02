@@ -80,7 +80,10 @@ pub fn typescript() -> String {
         (IncidentCause::docs(), IncidentCause::decl(&config)),
         (CaseIncident::docs(), CaseIncident::decl(&config)),
         (BlockedReport::docs(), BlockedReport::decl(&config)),
-        (crate::case_file::QuestionOption::docs(), crate::case_file::QuestionOption::decl(&config)),
+        (
+            crate::case_file::QuestionOption::docs(),
+            crate::case_file::QuestionOption::decl(&config),
+        ),
         (PendingQuestion::docs(), PendingQuestion::decl(&config)),
         (ClosingSummary::docs(), ClosingSummary::decl(&config)),
         (LinkKind::docs(), LinkKind::decl(&config)),

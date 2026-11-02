@@ -1092,9 +1092,8 @@ fn commands_stay_small(
 fn store_refusals_say_why(settings: &tl3_config::Store, console: &tl3_console::Running, node: u64) {
     let address = console.address();
     let path = format!("/api/requests/{node}/commands");
-    let own = format!(
-        "X-TL3-Console: 1\r\nOrigin: http://{address}\r\nSec-Fetch-Site: same-origin\r\n"
-    );
+    let own =
+        format!("X-TL3-Console: 1\r\nOrigin: http://{address}\r\nSec-Fetch-Site: same-origin\r\n");
     // 20,000 characters pass the console's cap, but four bytes each is over the store's.
     let wide = "5c6d7e8f-0000-4000-8000-000000000337";
     let body = format!(

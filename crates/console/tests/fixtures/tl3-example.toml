@@ -1,4 +1,4 @@
-# Copied from RobTand/trustladderiii crates/config/example.toml at 87a67c47.
+# Copied from RobTand/trustladderiii crates/config/example.toml at f138df8a.
 # Slice-one config. Paths are absolute; neither ~ nor environment variables expand.
 # Deployment placeholders parse offline. Replace them before Config::load.
 # docs/state-table.md, "Stopping": worktree lifecycle. Deployment starting path.

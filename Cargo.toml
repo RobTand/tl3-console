@@ -4,7 +4,7 @@ resolver = "3"
 
 # TL3's crates, pinned to the TL3 commit deployed on dl380g10. README.md says how to move the pin.
 [workspace.dependencies]
-tl3-config = { git = "https://github.com/RobTand/trustladderiii", rev = "6ecbf69bc67e1ef1648e809ec8d0d7b04d506208" }
-tl3-controller = { git = "https://github.com/RobTand/trustladderiii", rev = "6ecbf69bc67e1ef1648e809ec8d0d7b04d506208" }
-tl3-kernel = { git = "https://github.com/RobTand/trustladderiii", rev = "6ecbf69bc67e1ef1648e809ec8d0d7b04d506208" }
-tl3-store = { git = "https://github.com/RobTand/trustladderiii", rev = "6ecbf69bc67e1ef1648e809ec8d0d7b04d506208" }
+tl3-config = { git = "https://github.com/RobTand/trustladderiii", rev = "f138df8a270b4cad5dbec7647e348391ae402c7e" }
+tl3-controller = { git = "https://github.com/RobTand/trustladderiii", rev = "f138df8a270b4cad5dbec7647e348391ae402c7e" }
+tl3-kernel = { git = "https://github.com/RobTand/trustladderiii", rev = "f138df8a270b4cad5dbec7647e348391ae402c7e" }
+tl3-store = { git = "https://github.com/RobTand/trustladderiii", rev = "f138df8a270b4cad5dbec7647e348391ae402c7e" }
