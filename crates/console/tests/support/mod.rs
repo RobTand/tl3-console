@@ -1,4 +1,4 @@
-// Copied from RobTand/trustladderiii crates/store/tests/support at f138df8a. Keep in step when the TL3 pin moves.
+// Copied from RobTand/trustladderiii crates/store/tests/support at cd1dcb44. Keep in step when the TL3 pin moves.
 use postgresql_embedded::{PostgreSQL, Settings, VersionReq};
 use std::{
     collections::HashMap,
