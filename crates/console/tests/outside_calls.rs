@@ -4,7 +4,11 @@
 //! `adapters::github::writer_input`, builds text from a stored delivery and
 //! sends nothing.
 
-use std::{fs, path::Path, process::Command};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 /// HTTP clients, and TL3 crates whose job is talking to an outside service.
 const CLIENT_CRATES: &[&str] = &[
@@ -47,9 +51,20 @@ const OUTSIDE_CODE: &[&str] = &[
 
 const ALLOWED: &[&str] = &["adapters::github::writer_input"];
 
+/// The console crate's directory. Bazel runs tests from the workspace root
+/// in their runfiles; Cargo runs them from the crate.
+fn manifest() -> PathBuf {
+    let runfiles = Path::new("crates/console");
+    if runfiles.join("src").is_dir() {
+        runfiles.to_owned()
+    } else {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    }
+}
+
 /// The console crate's direct dependencies, as Cargo resolves them.
 fn direct_dependencies(manifest: &Path) -> Vec<String> {
-    if let Some(cargo) = option_env!("CARGO") {
+    if let Some(cargo) = option_env!("CARGO").filter(|cargo| Path::new(cargo).exists()) {
         let output = Command::new(cargo)
             .args([
                 "metadata",
@@ -137,8 +152,7 @@ fn sources(directory: &Path, found: &mut Vec<(String, String)>) {
 
 #[test]
 fn the_console_has_no_outside_client_dependency() {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let dependencies = direct_dependencies(manifest);
+    let dependencies = direct_dependencies(&manifest());
     assert!(
         dependencies.iter().any(|name| name == "tl3-controller"),
         "{dependencies:?}"
@@ -156,10 +170,7 @@ fn the_console_has_no_outside_client_dependency() {
 #[test]
 fn console_code_reaches_no_outside_service() {
     let mut found = Vec::new();
-    sources(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
-        &mut found,
-    );
+    sources(&manifest().join("src"), &mut found);
     assert!(found.len() > 5, "the console's sources were read");
     let reaching: Vec<_> = found
         .iter()
