@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { PromptSummary, PromptVersion, RolePrompt } from "../../api/types.gen";
+import { href, useRoute } from "../../route";
 import { PromptsPage } from "./PromptsPage";
 
 // CodeMirror needs layout jsdom lacks. Playwright drives the real editor and diff.
@@ -73,9 +74,11 @@ function serve(initial: PromptVersion[], active: number, update: number | null =
             active_builtin: current.builtin,
             builtin_update: state.update !== null,
           },
+          { role: "writer", active_number: 1, active_builtin: true, builtin_update: false },
         ]);
       }
       if (url === "/api/prompts/reviewer") return json(role());
+      if (url === "/api/prompts/writer") return json({ ...role(), role: "writer" });
       const one = url.match(/^\/api\/prompts\/reviewer\/versions\/(\d+)$/);
       if (one) return json(find(Number(one[1])));
       if (url === "/api/prompts/reviewer/versions") {
@@ -95,6 +98,7 @@ function serve(initial: PromptVersion[], active: number, update: number | null =
         return json(role());
       }
       if (url.startsWith("/api/prompts/reviewer/keep/")) {
+        if (state.update === null) return new Response("No built-in update waits for that version.", { status: 409 });
         state.update = null;
         return json(role());
       }
@@ -103,6 +107,7 @@ function serve(initial: PromptVersion[], active: number, update: number | null =
   );
   return {
     requests,
+    keepElsewhere: () => { state.update = null; },
     /** Another tab saves a version. */
     saveElsewhere: (text: string) => saveVersion(text, "From another tab."),
   };
@@ -123,7 +128,11 @@ const HISTORY = [version(2, 2), version(1, 1, { builtin: true, author: "TL3 depl
 const posts = (requests: Array<{ method: string; url: string }>) =>
   requests.filter((r) => r.method === "POST").map((r) => r.url);
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  window.history.replaceState(null, "", "/");
+});
 
 describe("PromptsPage", () => {
   it("lists roles and shows the active version and its history with author, time and note", async () => {
@@ -163,17 +172,76 @@ describe("PromptsPage", () => {
     expect(editor).toHaveFocus();
   });
 
-  it("starts over from a version another tab made active, dropping the edit made on the old one", async () => {
+  it("keeps the draft and note after a refetch changes the active version, and saves against the new base", async () => {
     const user = userEvent.setup();
-    const { saveElsewhere, client } = show(HISTORY, 2);
+    const { saveElsewhere, client, requests } = show(HISTORY, 2);
     await user.type(await screen.findByRole("textbox", { name: "Reviewer prompt, Markdown" }), " Mine.");
+    await user.type(screen.getByRole("textbox", { name: "Note" }), "Why.");
     saveElsewhere("Review prompt from another tab.");
     await act(() => client.invalidateQueries({ queryKey: ["prompts", "reviewer"] }));
     expect(await screen.findByText(/v3 active/)).toBeVisible();
-    expect(screen.getByRole("textbox", { name: "Reviewer prompt, Markdown" })).toHaveValue(
-      "Review prompt from another tab.",
-    );
-    expect(screen.getByRole("button", { name: "Save as v4" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Reviewer prompt, Markdown" })).toHaveValue("Review prompt v2. Mine.");
+    expect(screen.getByRole("textbox", { name: "Note" })).toHaveValue("Why.");
+    expect(screen.getByRole("status")).toHaveTextContent("Your edit is kept; check its changes against v3, then save.");
+    expect(screen.getByLabelText("Changes from v3")).toHaveTextContent("Review prompt from another tab. => Review prompt v2. Mine.");
+    await user.click(screen.getByRole("button", { name: "Save as v4" }));
+    expect(await screen.findByText(/v4 active/)).toBeVisible();
+    expect(requests.filter((r) => r.method === "POST").map((r) => r.body)).toEqual([
+      { text: "Review prompt v2. Mine.", note: "Why.", base: 3 },
+    ]);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it.each(["role", "Board", "back"])("asks before discarding unsaved text on %s navigation", async (target) => {
+    window.history.replaceState(null, "", "#/prompts/reviewer");
+    const user = userEvent.setup();
+    serve(HISTORY, 2);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    function Page() {
+      const route = useRoute();
+      return <>
+        <a href={href({ page: "board" })}>Board</a>
+        {route.page === "prompts" ? <PromptsPage role={route.role} /> : <p>The board</p>}
+      </>;
+    }
+    render(<QueryClientProvider client={client}><Page /></QueryClientProvider>);
+    await user.type(await screen.findByRole("textbox", { name: "Reviewer prompt, Markdown" }), " Mine.");
+    const leave = async () => {
+      if (target === "back") {
+        await act(() => {
+          window.history.replaceState(null, "", "#/");
+          window.dispatchEvent(new HashChangeEvent("hashchange"));
+        });
+      } else {
+        await user.click(screen.getByRole("link", { name: target === "role" ? /Writer/ : "Board" }));
+      }
+    };
+    await leave();
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("textbox", { name: "Reviewer prompt, Markdown" })).toHaveValue("Review prompt v2. Mine.");
+    expect(window.location.hash).toBe("#/prompts/reviewer");
+    confirm.mockReturnValue(true);
+    await leave();
+    expect(confirm).toHaveBeenCalledTimes(2);
+    if (target === "role") {
+      expect(await screen.findByRole("textbox", { name: "Writer prompt, Markdown" })).toHaveValue("Review prompt v2.");
+    } else {
+      expect(await screen.findByText("The board")).toBeVisible();
+    }
+  });
+
+  it("asks before closing the page with unsaved text, and stops guarding after Discard", async () => {
+    const user = userEvent.setup();
+    show(HISTORY, 2);
+    await user.type(await screen.findByRole("textbox", { name: "Reviewer prompt, Markdown" }), " Mine.");
+    const closing = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(closing);
+    expect(closing.defaultPrevented).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    const clean = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(clean);
+    expect(clean.defaultPrevented).toBe(false);
   });
 
   it("keeps Rob's edit when a save loses to another tab, and diffs it against the new version", async () => {
@@ -206,13 +274,31 @@ describe("PromptsPage", () => {
     expect(requests.find((r) => r.method === "POST")!.body).toEqual({ expected: 2 });
   });
 
-  it("shows why a revert from a stale page was refused", async () => {
+  it.each([
+    { action: "Revert", active: 2, button: "Revert to v1", retry: "Revert to v1" },
+    { action: "Activate", active: 1, button: "Activate v2", retry: "Revert to v2" },
+  ])("refetches after a 409 from $action so retry uses the new active version", async ({ active, button, retry }) => {
     const user = userEvent.setup();
-    const { saveElsewhere } = show(HISTORY, 2);
-    const revert = await screen.findByRole("button", { name: "Revert to v1" });
+    const { saveElsewhere, requests } = show(HISTORY, active);
+    const choose = await screen.findByRole("button", { name: button });
     saveElsewhere("Review prompt from another tab.");
-    await user.click(revert);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Another version became active after this page loaded.");
+    await user.click(choose);
+    expect(await screen.findByText(/v3 active/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: retry }));
+    expect(await screen.findByText(new RegExp(`v${active === 2 ? 1 : 2} active`))).toBeVisible();
+    expect(requests.filter((r) => r.method === "POST").map((r) => r.body)).toEqual([
+      { expected: active }, { expected: 3 },
+    ]);
+  });
+
+  it("refetches after a 409 from Keep so the resolved update disappears", async () => {
+    const user = userEvent.setup();
+    const { keepElsewhere, requests } = show([version(3, 3, { builtin: true }), ...HISTORY], 2, 3);
+    const keep = await screen.findByRole("button", { name: "Keep v2" });
+    keepElsewhere();
+    await user.click(keep);
+    await expect.poll(() => screen.queryByRole("region", { name: "Built-in update" })).toBeNull();
+    expect(requests.filter((r) => r.url === "/api/prompts/reviewer" && r.method === "GET")).toHaveLength(2);
   });
 
   it("won't revert over an unsaved edit, and says why in visible text", async () => {
