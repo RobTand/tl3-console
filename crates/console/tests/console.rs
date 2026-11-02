@@ -58,7 +58,7 @@ fn main() {
     streams_again_after_postgres_restarts(address, &mut database, &settings, records.path());
     println!("test streams_again_after_postgres_restarts ... ok");
     database.stop();
-    println!("9 console scenarios passed; no skips");
+    println!("10 console scenarios passed; no skips");
 }
 
 fn bootstrap() -> Bootstrap {
