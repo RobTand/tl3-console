@@ -155,6 +155,11 @@ class Configuration(unittest.TestCase):
             self.assertIn('check-success = Rust', conditions)
             self.assertIn('check-success = Web', conditions)
 
+    def test_labels_never_rerun_the_gate(self):
+        workflow = (ROOT / '.github/workflows/gate.yml').read_text()
+        types = re.search(r'pull_request:\n    types: \[(.*)\]', workflow).group(1)
+        self.assertNotIn('labeled', types)
+
     def test_workflow_names_the_required_checks(self):
         workflow = (ROOT / '.github/workflows/gate.yml').read_text()
         self.assertIn('    name: Rust\n', workflow)
