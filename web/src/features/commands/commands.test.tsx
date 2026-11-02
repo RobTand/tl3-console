@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, render as testingRender, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import type { Action, CardQuestion, CommandRecord } from "../../api/types.gen";
@@ -7,6 +8,11 @@ import { commandId, fileCommand } from "./api";
 import { CardCommands } from "./CardCommands";
 import { CommandsProvider } from "./commands";
 import { DeferAll } from "./DeferAll";
+
+function render(children: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return testingRender(children, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> });
+}
 
 type Filed = { node: number; id: string; action: Action };
 
