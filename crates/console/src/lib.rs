@@ -8,6 +8,7 @@ pub mod api;
 pub mod case_file;
 pub mod config;
 mod feed;
+mod hosts;
 mod rebuild;
 mod server;
 mod sessions;
@@ -56,6 +57,9 @@ pub struct Options {
     pub models: Option<tl3_config::Models>,
     /// Where the case file's links point.
     pub links: case_file::Links,
+    /// Host names the console answers to besides its listen address, such as a
+    /// tunnel's public name.
+    pub public_hosts: Vec<String>,
 }
 
 /// A console serving on its own threads.
@@ -107,7 +111,9 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         assets,
         models,
         links,
+        public_hosts,
     } = options;
+    let hosts = hosts::Hosts::new(address, &public_hosts)?;
     let case_files = case_file::CaseFiles {
         store: store.clone(),
         models: models.clone().map(Arc::new),
@@ -161,7 +167,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         .thread_name("tl3-console-http")
         .enable_all()
         .build()?;
-    let app = server::router(published, &assets, case_file::routes(case_files));
+    let app = server::router(published, &assets, case_file::routes(case_files), hosts);
     supervisor.spawn("http", move || {
         let served = runtime.block_on(async move {
             let listener = tokio::net::TcpListener::from_std(listener)?;
