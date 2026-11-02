@@ -11,6 +11,7 @@ pub mod config;
 mod feed;
 pub mod hidden;
 mod hosts;
+mod postmortems;
 mod prompts;
 mod rebuild;
 pub mod schema;
@@ -100,6 +101,7 @@ pub(crate) struct Published {
     pub commands: Option<Arc<Vec<CommandRecord>>>,
     /// The change feed is open and the last build read the store.
     pub connected: bool,
+    pub postmortems: u64,
 }
 
 /// Open one read-only session the way the board does. Fails when the store's
@@ -135,6 +137,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         hidden: hidden.clone(),
     };
     let prompt_store = store.clone();
+    let postmortems = postmortems::routes(store.clone(), hidden.clone());
     let filer = commands::router(store.clone(), hidden.clone(), case_files.sessions.clone());
     {
         let (store, rebuilds, connected) = (store.clone(), rebuilds.clone(), connected.clone());
@@ -161,6 +164,11 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
             }
             publish.send_if_modified(|current| {
                 let mut changed = current.connected != live;
+                if built.is_ok() && matches!(change, Change::Postmortems | Change::WorldPostmortems)
+                {
+                    current.postmortems += 1;
+                    changed = true;
+                }
                 current.connected = live;
                 if let Ok((board, _)) = &built
                     && current
@@ -184,7 +192,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
             // failed build (a schema tl3d hasn't migrated yet) retries itself.
             if built.is_err() && connected.load(Ordering::SeqCst) {
                 std::thread::sleep(retry.delay());
-                rebuilds.request(Change::World);
+                rebuilds.request(change);
             }
         }
     })?;
@@ -196,7 +204,9 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
     let app = server::router(
         published,
         &assets,
-        case_file::routes(case_files).merge(filer),
+        case_file::routes(case_files)
+            .merge(filer)
+            .merge(postmortems),
         prompt_store,
         hosts,
     );
@@ -257,7 +267,7 @@ impl Builder {
         let session = self.reader.as_mut().expect("an open reader");
         let mut tx = session.transaction()?;
         let rows = match (change, self.rows.take()) {
-            (Change::Progress | Change::Commands, Some(mut rows)) => {
+            (Change::Progress | Change::Commands | Change::Postmortems, Some(mut rows)) => {
                 rows.refresh_progress(&mut tx)?;
                 rows
             }

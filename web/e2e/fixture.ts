@@ -38,6 +38,10 @@ export async function startFixture() {
       child.stdin.write("apply\n");
       await next();
     },
+    finishPostmortem: async () => {
+      child.stdin.write("finish-postmortem\n");
+      await next();
+    },
     stop: () =>
       new Promise<void>((resolve) => {
         child.once("exit", () => resolve());

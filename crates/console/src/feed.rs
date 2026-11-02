@@ -52,19 +52,25 @@ impl Backoff {
     }
 }
 
-/// Progress tables change without a controller commit, and the console files
-/// commands without one; anything else is the world.
+/// Preserve postmortem invalidation even when its tables change with the world.
 fn change(tables: &BTreeSet<String>) -> Change {
     let progress = |table: &str| matches!(table, "tl3_worker_progress" | "tl3_worker_summary");
-    if tables.iter().all(|table| progress(table)) {
-        Change::Progress
-    } else if tables
+    let postmortem = |table: &str| {
+        matches!(
+            table,
+            "tl3_postmortems" | "tl3_postmortem_recommendations" | "tl3_code_grades"
+        )
+    };
+    let postmortems = tables.iter().any(|table| postmortem(table));
+    let world = tables
         .iter()
-        .all(|table| progress(table) || table == "tl3_console_commands")
-    {
-        Change::Commands
-    } else {
-        Change::World
+        .any(|table| !progress(table) && !postmortem(table) && table != "tl3_console_commands");
+    match (world, postmortems) {
+        (true, true) => Change::WorldPostmortems,
+        (true, false) => Change::World,
+        (false, true) => Change::Postmortems,
+        (false, false) if tables.contains("tl3_console_commands") => Change::Commands,
+        (false, false) => Change::Progress,
     }
 }
 
@@ -81,7 +87,7 @@ pub(crate) fn run(
             Ok(mut listener) => {
                 reported = false;
                 connected.store(true, Ordering::SeqCst);
-                rebuilds.request(Change::World);
+                rebuilds.request(Change::WorldPostmortems);
                 let error = loop {
                     match listener.wait() {
                         Ok(tables) => rebuilds.request(change(&tables)),

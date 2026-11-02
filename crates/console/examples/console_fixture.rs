@@ -284,6 +284,7 @@ fn main() {
         })
         .collect();
     seed_prompts(&settings);
+    seed_postmortems(&settings);
     let console = tl3_console::start(
         TcpListener::bind("127.0.0.1:0").unwrap(),
         tl3_console::Options {
@@ -306,6 +307,11 @@ fn main() {
     );
     for line in std::io::stdin().lock().lines() {
         let line = line.unwrap();
+        if line.trim() == "finish-postmortem" {
+            finish_postmortem(&settings);
+            println!("{}", json!({ "finished": true }));
+            continue;
+        }
         if line.trim() == "apply" {
             tl3_controller::ingress::drain(&mut controller).unwrap();
             println!("{}", json!({ "applied": true }));
@@ -377,4 +383,39 @@ fn column(settings: &tl3_config::Store, repo: &str, issue: u64) -> Column {
         .find(|card| card.issue == issue && card.repo == repo)
         .map(|card| card.column)
         .unwrap()
+}
+
+fn postmortem_client(settings: &tl3_config::Store) -> postgres::Client {
+    postgres::Config::new()
+        .host(&settings.host)
+        .port(settings.port)
+        .user(&settings.user)
+        .dbname(&settings.database)
+        .password("tl3-disposable-test-password")
+        .connect(postgres::NoTls)
+        .unwrap()
+}
+
+fn seed_postmortems(settings: &tl3_config::Store) {
+    postmortem_client(settings).batch_execute(r#"
+        INSERT INTO tl3_postmortems(node_id, trigger, reason, repo, issue, title, revision, owed_at, status, cause, summary, timeline, process_failures, notes, started_at, finished_at)
+        SELECT '0', 'rob:fixture', 'rob_asked', 'RobTand/tl3-sandbox', 100, 'Shard the GPU benchmark queue by device class', max(revision), clock_timestamp() - interval '15 minutes', 'done', 'tl3',
+            'The queue accepted two device classes in the same batch. The second attempt separated them before the change merged.',
+            '[{"time":"09:14 UTC","event":"First run submitted a mixed batch"},{"time":"09:18 UTC","event":"Review caught the device mismatch"},{"time":"09:26 UTC","event":"The revised queue merged"}]',
+            '[{"phase":"making","failure":"The admission check did not compare device classes","evidence":"Mixed classes in batch 17"}]',
+            'Keep the device constraint in the admission check.', clock_timestamp() - interval '14 minutes', clock_timestamp() - interval '12 minutes' FROM tl3_events;
+        INSERT INTO tl3_postmortems(node_id, trigger, reason, repo, issue, title, revision, owed_at, status, failed_at, failure)
+        SELECT '1', 'rob:fixture', 'rob_asked', 'RobTand/prismabuild', 101, 'Retry Hindsight writes after a 429', max(revision), clock_timestamp() - interval '10 minutes', 'failed', clock_timestamp() - interval '9 minutes', 'The judge model call was interrupted.' FROM tl3_events;
+        INSERT INTO tl3_postmortems(node_id, trigger, reason, repo, issue, title, revision, owed_at, status, cause, summary, started_at, finished_at)
+        SELECT node_id, 'rob:fixture-previous', reason, repo, issue, title, revision, owed_at - interval '1 minute', status, cause, summary, started_at, finished_at
+        FROM tl3_postmortems WHERE node_id = '0' AND trigger = 'rob:fixture';
+        INSERT INTO tl3_postmortem_recommendations(postmortem_id, fingerprint, rank, phase, kind, target, operation, before, after, evidence, effect)
+        SELECT id, 'rec-0123456789abcdef', 1, 'making', 'prompt', 'Check admission constraints before submitting work', 'add', '',
+            'Read the worker capacity and device requirements before submitting a batch.', 'Batch 17 combined two device classes; review caught the mismatch.', 'Catch incompatible work before it reaches the queue.'
+        FROM tl3_postmortems WHERE trigger IN ('rob:fixture', 'rob:fixture-previous');
+    "#).unwrap();
+}
+
+fn finish_postmortem(settings: &tl3_config::Store) {
+    postmortem_client(settings).batch_execute("UPDATE tl3_postmortems SET status = 'done', started_at = clock_timestamp(), finished_at = clock_timestamp(), summary = 'Calibration needs representative input samples.', cause = 'tl3' WHERE node_id = '2'").unwrap();
 }

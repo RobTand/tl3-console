@@ -1,0 +1,222 @@
+{
+  "tl3_pin": "d8b561f50a3559f08cb8c9c961e587e58b302158",
+  "runs": [
+    {
+      "name": "rust_red",
+      "action_key": "4f7ddf8fbd4b97cbae15b3b19f3dfd13c7354dd6b55a3304f8d5e5ba79a1b03a",
+      "source_commit": "1596da6709622b2b86a10507ee2b3d02ac327c93",
+      "host": "dl380g10",
+      "status": "failed",
+      "exit_code": 101,
+      "receipt_sha256": null,
+      "result": null,
+      "payload_verified": false,
+      "summary": [
+        "test postmortems_request_all_triggers_and_grades ... FAILED",
+        "test postmortems_search_filters_and_keyset_paging ... FAILED",
+        "test postmortems_hidden_repos_and_counts ... FAILED",
+        "test postmortems_three_tables_refresh_stream_without_world_change ... FAILED"
+      ]
+    },
+    {
+      "name": "web_red",
+      "action_key": "e1406e364957e7aff82b16ad9a2ea2bdf54595cf37494caf4460e5f2982467ba",
+      "source_commit": "d090100c62affc6cbe420dd1516498f537838827",
+      "host": "dl380g10",
+      "status": "failed",
+      "exit_code": 1,
+      "receipt_sha256": null,
+      "result": null,
+      "payload_verified": false,
+      "summary": [
+        "      Tests  4 failed | 6 passed (10)",
+        "  1 failed",
+        "  1 skipped"
+      ]
+    },
+    {
+      "name": "paging_red",
+      "action_key": "c1c5f7a82c2bc2e56c0b7c5098f814f1ade5fa80590c243f3086b47bf451622f",
+      "source_commit": "75700dc47ea7db8101c37d8ca2cad446d0dc9348",
+      "host": "dl380g10",
+      "status": "failed",
+      "exit_code": 1,
+      "receipt_sha256": null,
+      "result": null,
+      "payload_verified": false,
+      "summary": [
+        " Test Files  1 failed | 17 passed (18)",
+        "      Tests  2 failed | 101 passed (103)"
+      ]
+    },
+    {
+      "name": "rust_dl380g10",
+      "action_key": "9648179608a4f70bc29d7ff21d7e363069c2232491b84f52d7a5f3a8018ef161",
+      "source_commit": "59466d8fdfa0b0abcb03b6f73268053c376fbba4",
+      "host": "dl380g10",
+      "status": "done",
+      "exit_code": 0,
+      "receipt_sha256": "15333b6c25c0ea050abc4b378d6a429a87ac4216d30593fae17bcd2029e073bb",
+      "result": {
+        "sha256": "35b476d71faa1bd1893bf970f21fb82578d9c9233a1107d42f551c188bf1859c",
+        "bytes": 16934
+      },
+      "payload_verified": true,
+      "summary": [
+        "test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "6 case file scenarios passed; no skips",
+        "test postmortems_request_all_triggers_and_grades ... ok",
+        "test postmortems_search_filters_and_keyset_paging ... ok",
+        "test postmortems_hidden_repos_and_counts ... ok",
+        "test postmortems_three_tables_refresh_stream_without_world_change ... ok",
+        "20 console scenarios passed; no skips",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    {
+      "name": "rust_sparky",
+      "action_key": "d00e4ef4a9820659a82ebbc84dafe4cb0b0fe93a6cbd47b9380edc1a425a5fee",
+      "source_commit": "59466d8fdfa0b0abcb03b6f73268053c376fbba4",
+      "host": "sparky",
+      "status": "done",
+      "exit_code": 0,
+      "receipt_sha256": "b2769d744d75a2132f394a4bcf15cc7c8047c27a2a875984b4def081ff4029e7",
+      "result": {
+        "sha256": "09733b84312e72e9c4c9c94cb21d5c1fdd7a1ef91173679adc95938470e073c4",
+        "bytes": 24861
+      },
+      "payload_verified": true,
+      "summary": [
+        "test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "6 case file scenarios passed; no skips",
+        "test postmortems_request_all_triggers_and_grades ... ok",
+        "test postmortems_search_filters_and_keyset_paging ... ok",
+        "test postmortems_hidden_repos_and_counts ... ok",
+        "test postmortems_three_tables_refresh_stream_without_world_change ... ok",
+        "20 console scenarios passed; no skips",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    {
+      "name": "rust_sparklina",
+      "action_key": "1a16ff0a8f08ad60e48ac3f982a9e7a78b085aa74f4f692ec6322b1a813bedfc",
+      "source_commit": "59466d8fdfa0b0abcb03b6f73268053c376fbba4",
+      "host": "sparklina",
+      "status": "done",
+      "exit_code": 0,
+      "receipt_sha256": "305fb0461e4a5ffa08b0c5de78f07d6b9c503adccab9fbbb05d8f094add0e1c7",
+      "result": {
+        "sha256": "a6e66f1536c12dcca141653240d81eba69844fb20212ae091e5c020d61ff2dcc",
+        "bytes": 34565
+      },
+      "payload_verified": true,
+      "summary": [
+        "test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "6 case file scenarios passed; no skips",
+        "test postmortems_request_all_triggers_and_grades ... ok",
+        "test postmortems_search_filters_and_keyset_paging ... ok",
+        "test postmortems_hidden_repos_and_counts ... ok",
+        "test postmortems_three_tables_refresh_stream_without_world_change ... ok",
+        "20 console scenarios passed; no skips",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    {
+      "name": "rust_final_code",
+      "action_key": "013447663c0d33cc1292d9a15747e0d7102b636e2065db7dcb714483874f24aa",
+      "source_commit": "3db0a4941f10c69435f24d268ee415cb16bc7bdd",
+      "host": "sparky",
+      "status": "done",
+      "exit_code": 0,
+      "receipt_sha256": "37f89d21ddb59af9e045e221757dc4c1166507144437feaad83c2b3761115d8f",
+      "result": {
+        "sha256": "760c1efc61f66cdf682eaf2cbafbaece9462579b7c2d5428ef01475136bea31a",
+        "bytes": 15926
+      },
+      "payload_verified": true,
+      "summary": [
+        "test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "6 case file scenarios passed; no skips",
+        "test postmortems_request_all_triggers_and_grades ... ok",
+        "test postmortems_search_filters_and_keyset_paging ... ok",
+        "test postmortems_hidden_repos_and_counts ... ok",
+        "test postmortems_three_tables_refresh_stream_without_world_change ... ok",
+        "20 console scenarios passed; no skips",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    {
+      "name": "web_dl380g10",
+      "action_key": "67148b80b51f34c846c50f3705ceceb84b7ae27f2ad1e6bc3668a140cb15581c",
+      "source_commit": "f541c1b3bac2f412ae4aa511e727da0318369b47",
+      "host": "dl380g10",
+      "status": "done",
+      "exit_code": 0,
+      "receipt_sha256": "4345283258eecfab8e3223c452824bc4529a74f426e41d7dac3c5c34b28de54f",
+      "result": {
+        "sha256": "64584d888c2901dee4fdee9a3878fe2b36b7d0b29748bce8531336099424761e",
+        "bytes": 11964
+      },
+      "payload_verified": true,
+      "summary": [
+        " Test Files  18 passed (18)",
+        "      Tests  103 passed (103)",
+        "  14 passed (2.7m)"
+      ]
+    },
+    {
+      "name": "web_sparky",
+      "action_key": "ca94248397e0743d8fe8aeb6e5a64cdbecb8aae6a7cd73a2baa67cef91aa6f3b",
+      "source_commit": "f541c1b3bac2f412ae4aa511e727da0318369b47",
+      "host": "sparky",
+      "status": "done",
+      "exit_code": 0,
+      "receipt_sha256": "604d7f91509f5610d53083fbe2f4c01ce63ccfd8f010eb3a9be2944c1f0aec27",
+      "result": {
+        "sha256": "d4966de3f1e00e06d9d46ab3e5e75a81bd985f14e6ff5b6d6dab4be49a936a4a",
+        "bytes": 11422
+      },
+      "payload_verified": true,
+      "summary": [
+        " Test Files  18 passed (18)",
+        "      Tests  103 passed (103)",
+        "  14 passed (2.0m)"
+      ]
+    },
+    {
+      "name": "web_sparklina",
+      "action_key": "d36c6fcc483fede05004c596a2ae1c8f0443a078986c91e49063c77cb2ab0ade",
+      "source_commit": "f541c1b3bac2f412ae4aa511e727da0318369b47",
+      "host": "sparklina",
+      "status": "done",
+      "exit_code": 0,
+      "receipt_sha256": "16aa1038e97b1d957929a6cfc93274478777d0bd756e2e050bfffdfab2a365db",
+      "result": {
+        "sha256": "fa297c427203e6dfb5941feff57d5e4104b1d3a2c19a1a45be645a051d74c025",
+        "bytes": 11261
+      },
+      "payload_verified": true,
+      "summary": [
+        " Test Files  18 passed (18)",
+        "      Tests  103 passed (103)",
+        "  14 passed (2.2m)"
+      ]
+    }
+  ]
+}

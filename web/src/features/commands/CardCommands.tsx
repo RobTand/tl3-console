@@ -1,3 +1,4 @@
+import { PostmortemButton } from "../postmortems/PostmortemButton";
 import { DropdownMenu } from "radix-ui";
 import { useEffect, useRef, useState } from "react";
 import type { Action, Card, CardQuestion, Ending, QuestionOption } from "../../api/types.gen";
@@ -358,6 +359,7 @@ export function CardCommands({ card, compact = false }: { card: Card; compact?: 
         </div>
       ))}
       <Steering card={card} compact={false} />
+      <PostmortemButton card={card} />
       {status}
     </div>
   );

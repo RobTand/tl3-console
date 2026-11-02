@@ -16,7 +16,10 @@ pub(crate) enum Change {
     Progress,
     /// Console commands filed, and any progress with them.
     Commands,
+    Postmortems,
     World,
+    /// A world rebuild that must also invalidate postmortem views.
+    WorldPostmortems,
 }
 
 #[derive(Default)]
@@ -28,7 +31,12 @@ struct State {
 impl Rebuilds {
     pub(crate) fn request(&self, change: Change) {
         let mut state = self.state.lock().expect("rebuild state");
-        state.stale = state.stale.max(Some(change));
+        state.stale = Some(match (state.stale, change) {
+            (Some(Change::World), Change::Postmortems)
+            | (Some(Change::Postmortems), Change::World) => Change::WorldPostmortems,
+            (Some(previous), change) => previous.max(change),
+            (None, change) => change,
+        });
         self.wake.notify_one();
     }
 
@@ -111,6 +119,30 @@ mod tests {
         rebuilds.request(Change::Commands);
         rebuilds.request(Change::World);
         assert_eq!(rebuilds.next(), Some(Change::World));
+    }
+
+    #[test]
+    fn postmortems_survive_coalescing_with_world_changes_in_either_order() {
+        for changes in [
+            [Change::Postmortems, Change::World],
+            [Change::World, Change::Postmortems],
+        ] {
+            let rebuilds = Rebuilds::default();
+            for change in changes {
+                rebuilds.request(change);
+            }
+            let combined = rebuilds.next().unwrap();
+            assert_ne!(
+                combined,
+                Change::World,
+                "world alone loses postmortem invalidation"
+            );
+            assert_ne!(
+                combined,
+                Change::Postmortems,
+                "postmortems alone loses the world rebuild"
+            );
+        }
     }
 
     #[test]

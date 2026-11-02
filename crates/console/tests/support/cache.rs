@@ -1,4 +1,4 @@
-// Copied from RobTand/trustladderiii crates/store/tests/support at 2220efd9. Keep in step when the TL3 pin moves.
+// Copied from RobTand/trustladderiii crates/store/tests/support/cache.rs at 2220efd9e9e302774b986c69736cdbe338b7c1cc.
 use super::scratch::owned_metadata;
 use postgresql_embedded::{PostgreSQL, Settings};
 use std::{
