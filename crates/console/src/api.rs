@@ -31,6 +31,67 @@ pub struct PatchEvent {
     pub patch: BoardPatch,
 }
 
+/// One version of a role's system prompt. `number` counts a role's versions from 1.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+pub struct PromptVersion {
+    pub id: i64,
+    pub number: i64,
+    pub text: String,
+    pub builtin: bool,
+    pub author: String,
+    pub note: String,
+    pub created_ms: i64,
+}
+
+/// A version in a role's history, without its text. Fetch the text from
+/// `GET /api/prompts/{role}/versions/{id}`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+pub struct PromptSummary {
+    pub id: i64,
+    pub number: i64,
+    pub builtin: bool,
+    pub author: String,
+    pub note: String,
+    pub created_ms: i64,
+}
+
+/// A role's prompt: the active version, its history, newest first, and a
+/// built-in version a deploy shipped while another stayed active.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+pub struct RolePrompt {
+    pub role: String,
+    pub active: PromptVersion,
+    pub activated_by: String,
+    pub activated_ms: i64,
+    pub builtin_update: Option<PromptVersion>,
+    pub versions: Vec<PromptSummary>,
+}
+
+/// A role in the prompt list.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+pub struct PromptRole {
+    pub role: String,
+    pub active_number: i64,
+    pub active_builtin: bool,
+    pub builtin_update: bool,
+}
+
+/// `POST /api/prompts/{role}/versions`: a version that becomes active at
+/// once. `base` is the active version the edit started from.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, TS)]
+pub struct NewPromptVersion {
+    pub text: String,
+    pub note: String,
+    pub base: i64,
+}
+
+/// `POST /api/prompts/{role}/activate/{version}`: `expected` is the version
+/// the page showed as active.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, TS)]
+pub struct ActivateVersion {
+    pub expected: i64,
+}
+
 /// `POST /api/requests/{id}/commands`.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
@@ -88,6 +149,12 @@ pub fn typescript() -> String {
         (ClosingSummary::docs(), ClosingSummary::decl(&config)),
         (LinkKind::docs(), LinkKind::decl(&config)),
         (Link::docs(), Link::decl(&config)),
+        (PromptVersion::docs(), PromptVersion::decl(&config)),
+        (PromptSummary::docs(), PromptSummary::decl(&config)),
+        (RolePrompt::docs(), RolePrompt::decl(&config)),
+        (PromptRole::docs(), PromptRole::decl(&config)),
+        (NewPromptVersion::docs(), NewPromptVersion::decl(&config)),
+        (ActivateVersion::docs(), ActivateVersion::decl(&config)),
         (CardQuestion::docs(), CardQuestion::decl(&config)),
         (QuestionOption::docs(), QuestionOption::decl(&config)),
         (AnswerKind::docs(), AnswerKind::decl(&config)),

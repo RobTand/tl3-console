@@ -210,6 +210,40 @@ export type Link = { kind: LinkKind,
 label: string, url: string, };
 
 /**
+ * One version of a role's system prompt. `number` counts a role's versions from 1.
+ */
+export type PromptVersion = { id: number, number: number, text: string, builtin: boolean, author: string, note: string, created_ms: number, };
+
+/**
+ * A version in a role's history, without its text. Fetch the text from
+ * `GET /api/prompts/{role}/versions/{id}`.
+ */
+export type PromptSummary = { id: number, number: number, builtin: boolean, author: string, note: string, created_ms: number, };
+
+/**
+ * A role's prompt: the active version, its history, newest first, and a
+ * built-in version a deploy shipped while another stayed active.
+ */
+export type RolePrompt = { role: string, active: PromptVersion, activated_by: string, activated_ms: number, builtin_update: PromptVersion | null, versions: Array<PromptSummary>, };
+
+/**
+ * A role in the prompt list.
+ */
+export type PromptRole = { role: string, active_number: number, active_builtin: boolean, builtin_update: boolean, };
+
+/**
+ * `POST /api/prompts/{role}/versions`: a version that becomes active at
+ * once. `base` is the active version the edit started from.
+ */
+export type NewPromptVersion = { text: string, note: string, base: number, };
+
+/**
+ * `POST /api/prompts/{role}/activate/{version}`: `expected` is the version
+ * the page showed as active.
+ */
+export type ActivateVersion = { expected: number, };
+
+/**
  * An open question as Rob sees it on the issue, with its options.
  */
 export type CardQuestion = { 

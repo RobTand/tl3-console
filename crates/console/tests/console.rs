@@ -64,6 +64,10 @@ fn main() {
     store_refusals_say_why(&settings, &filer, node);
     println!("test store_refusals_say_why ... ok");
     drop(filer);
+    prompt_store_errors_have_actionable_responses(assets.path());
+    println!("test prompt_store_errors_have_actionable_responses ... ok");
+    let prompt_database = prompts_edit_and_revert_through_the_api(assets.path());
+    println!("test prompts_edit_and_revert_through_the_api ... ok");
     drop(controller);
     builds_once_the_store_is_migrated(&mut database, assets.path());
     println!("test builds_once_the_store_is_migrated ... ok");
@@ -81,7 +85,8 @@ fn main() {
     println!("test streams_again_after_postgres_restarts ... ok");
     database.stop();
     hidden_database.stop();
-    println!("18 console scenarios passed; no skips");
+    prompt_database.stop();
+    println!("20 console scenarios passed; no skips");
 }
 
 fn bootstrap() -> Bootstrap {
@@ -108,6 +113,7 @@ fn issue(number: u64) -> LabelledIssue {
         title: format!("Console fixture {number}"),
         actor: 24923402,
         label: "tl3".into(),
+        labels: vec![],
     }
 }
 
@@ -1439,5 +1445,384 @@ fn hides_repos_from_every_view(assets: &Path) -> Database {
             break;
         }
     }
+    database
+}
+
+/// An HTTP request from the console's page, or from another site's.
+fn send(
+    address: SocketAddr,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: Option<&Value>,
+) -> (u16, Vec<u8>) {
+    let body = body.map(Value::to_string).unwrap_or_default();
+    let mut head = String::from("Content-Type: application/json\r\n");
+    for (name, value) in headers {
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    request_with_body(address, method, path, &address.to_string(), &head, &body)
+}
+
+fn json_body(response: (u16, Vec<u8>), status: u16) -> Value {
+    assert_eq!(
+        response.0,
+        status,
+        "{}",
+        String::from_utf8_lossy(&response.1)
+    );
+    serde_json::from_slice(&response.1).unwrap()
+}
+
+/// Real SQLSTATEs from the embedded store, followed by a connection outage.
+fn prompt_store_errors_have_actionable_responses(assets: &Path) {
+    let mut database = Database::start();
+    let settings = database.create("prompt_errors");
+    let mut store = Store::open(&settings).unwrap();
+    tl3_controller::prompts::seed(&mut store).unwrap();
+    let login = "console_prompt_errors";
+    tl3_store::grant_reader(&settings, login, settings.password_file.as_deref().unwrap()).unwrap();
+    let console = tl3_console::start(
+        TcpListener::bind("127.0.0.1:0").unwrap(),
+        tl3_console::Options {
+            store: tl3_config::Store {
+                user: login.into(),
+                ..settings.clone()
+            },
+            assets: assets.into(),
+            models: None,
+            links: Default::default(),
+            public_hosts: vec![],
+            hidden: Default::default(),
+        },
+    )
+    .unwrap();
+    let address = console.address();
+    let role = json_body(send(address, "GET", "/api/prompts/writer", &[], None), 200);
+    let base = role["active"]["id"].as_i64().unwrap();
+    let page = [("X-TL3-Console", "1")];
+    let path = "/api/prompts/writer/versions";
+    let edit = serde_json::json!({"text": "An edit.", "note": "Why.", "base": base});
+    let mut admin = raw(&settings);
+    let sessions = |admin: &mut postgres::Client| -> Vec<i32> {
+        admin
+            .query(
+                "SELECT pid FROM pg_stat_activity WHERE usename = $1 ORDER BY pid",
+                &[&login],
+            )
+            .unwrap()
+            .iter()
+            .map(|row| row.get(0))
+            .collect()
+    };
+    let original = sessions(&mut admin);
+    admin
+        .batch_execute("REVOKE tl3_prompt_editor FROM console_prompt_errors")
+        .unwrap();
+    let denied = send(address, "POST", path, &page, Some(&edit));
+    let after_denied = sessions(&mut admin);
+    admin
+        .batch_execute("GRANT tl3_prompt_editor TO console_prompt_errors")
+        .unwrap();
+    let nul = serde_json::json!({"text": "Bad\0text", "note": "Why.", "base": base});
+    let invalid = send(address, "POST", path, &page, Some(&nul));
+    let after_invalid = sessions(&mut admin);
+    admin
+        .batch_execute(
+            "CREATE FUNCTION reject_prompt_text() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN RAISE EXCEPTION 'Prompt text cannot be converted' USING ERRCODE = '22001'; END $$;
+         CREATE TRIGGER reject_prompt_text BEFORE INSERT ON tl3_prompt_versions
+         FOR EACH ROW EXECUTE FUNCTION reject_prompt_text();",
+        )
+        .unwrap();
+    let other_text = send(address, "POST", path, &page, Some(&edit));
+    let after_other = sessions(&mut admin);
+    admin
+        .batch_execute("DROP TRIGGER reject_prompt_text ON tl3_prompt_versions")
+        .unwrap();
+    // Closing the real socket must return 503, then open a fresh session on recovery.
+    drop(admin);
+    drop(store);
+    database.stop();
+    let unavailable = send(address, "POST", path, &page, Some(&edit));
+    database.resume();
+    let recovered = send(address, "POST", path, &page, Some(&edit));
+    database.stop();
+    let statuses = [
+        denied.0,
+        invalid.0,
+        other_text.0,
+        unavailable.0,
+        recovered.0,
+    ];
+    assert_eq!(
+        statuses,
+        [500, 422, 422, 503, 201],
+        "permission (42501), NUL (22021), text (22001), I/O outage, recovery; bodies: {:?}",
+        [&denied.1, &invalid.1, &other_text.1, &unavailable.1]
+            .map(|body| String::from_utf8_lossy(body))
+    );
+    assert!(String::from_utf8_lossy(&denied.1).contains(
+        "The console's database login can't edit prompts; TL3's deploy grants it (tl3-deploy console-role)"));
+    assert!(String::from_utf8_lossy(&invalid.1).contains("invalid byte sequence"));
+    assert!(String::from_utf8_lossy(&other_text.1).contains("Prompt text cannot be converted"));
+    assert!(String::from_utf8_lossy(&unavailable.1).contains("Try again shortly"));
+    assert_eq!(
+        original, after_denied,
+        "permission denial dropped the session"
+    );
+    assert_eq!(original, after_invalid, "bad text dropped the session");
+    assert_eq!(original, after_other, "data exception dropped the session");
+}
+
+/// Rob saves a prompt version, sees it active, and reverts it, through a
+/// console whose login may write prompt versions and nothing else.
+fn prompts_edit_and_revert_through_the_api(assets: &Path) -> Database {
+    // Test consoles keep their sessions for the process lifetime. Isolate the
+    // prompt sessions from the shared cluster's 20-connection limit.
+    let mut database = Database::start();
+    let settings = database.create("console_prompts");
+    let mut store = Store::open(&settings).unwrap();
+    tl3_controller::prompts::seed(&mut store).unwrap();
+    let login = "tl3_console_prompts";
+    tl3_store::grant_reader(&settings, login, settings.password_file.as_deref().unwrap()).unwrap();
+    let console_store = tl3_config::Store {
+        user: login.into(),
+        ..settings.clone()
+    };
+    let start = |store: &tl3_config::Store| {
+        tl3_console::start(
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            tl3_console::Options {
+                store: store.clone(),
+                assets: assets.into(),
+                models: None,
+                links: Default::default(),
+                public_hosts: vec![],
+                hidden: Default::default(),
+            },
+        )
+        .unwrap()
+    };
+    let console = start(&console_store);
+    let address = console.address();
+    let page = [("X-TL3-Console", "1")];
+    let roles = json_body(send(address, "GET", "/api/prompts", &[], None), 200);
+    let names: Vec<_> = tl3_controller::prompts::BUILTIN
+        .iter()
+        .map(|(role, _)| serde_json::json!({"role": role, "active_number": 1, "active_builtin": true, "builtin_update": false}))
+        .collect();
+    assert_eq!(roles, Value::Array(names));
+    let writer = json_body(send(address, "GET", "/api/prompts/writer", &[], None), 200);
+    let shipped = writer["active"]["id"].as_i64().unwrap();
+    let builtin = tl3_controller::prompts::BUILTIN
+        .iter()
+        .find(|(role, _)| *role == "writer")
+        .unwrap()
+        .1;
+    assert_eq!(writer["active"]["text"], builtin);
+    let edit = serde_json::json!({"text": "Write for Rob, briefly.", "note": "Shorter notes.", "base": shipped});
+    let path = "/api/prompts/writer/versions";
+    for path in [
+        path.to_string(),
+        format!("/api/prompts/writer/activate/{shipped}"),
+        format!("/api/prompts/writer/keep/{shipped}"),
+    ] {
+        let (status, _) = request_with_body(
+            address,
+            "POST",
+            &path,
+            "attacker.invalid",
+            "Content-Type: application/json\r\nX-TL3-Console: 1\r\nOrigin: http://attacker.invalid\r\nSec-Fetch-Site: same-origin\r\n",
+            &edit.to_string(),
+        );
+        assert_eq!(status, 421, "POST {path} with a foreign Host");
+    }
+    let unchanged = json_body(send(address, "GET", "/api/prompts/writer", &[], None), 200);
+    assert_eq!(unchanged, writer, "foreign-Host writes changed the prompt");
+    assert_eq!(send(address, "POST", path, &[], Some(&edit)).0, 403);
+    let other_site = [
+        ("X-TL3-Console", "1"),
+        ("Origin", "http://attacker.invalid"),
+    ];
+    assert_eq!(send(address, "POST", path, &other_site, Some(&edit)).0, 403);
+    let no_note = serde_json::json!({"text": "Write for Rob.", "note": " ", "base": shipped});
+    assert_eq!(send(address, "POST", path, &page, Some(&no_note)).0, 400);
+    let own_site = format!("http://{address}");
+    let saved = json_body(
+        send(
+            address,
+            "POST",
+            path,
+            &[("X-TL3-Console", "1"), ("Origin", &own_site)],
+            Some(&edit),
+        ),
+        201,
+    );
+    let version = &saved["active"];
+    assert_eq!(saved["versions"][0]["id"], version["id"]);
+    assert_eq!(
+        (
+            &version["number"],
+            &version["text"],
+            &version["note"],
+            &version["author"],
+            &version["builtin"]
+        ),
+        (
+            &Value::from(2),
+            &Value::from("Write for Rob, briefly."),
+            &Value::from("Shorter notes."),
+            &Value::from("Rob"),
+            &Value::from(false)
+        )
+    );
+    let mine = version["id"].as_i64().unwrap();
+    // The history names each version without its text; one comes on request.
+    let history = json_body(send(address, "GET", path, &[], None), 200);
+    assert_eq!(history, saved["versions"]);
+    assert!(
+        history
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row.get("text").is_none())
+    );
+    let first = json_body(
+        send(address, "GET", &format!("{path}/{shipped}"), &[], None),
+        200,
+    );
+    assert_eq!(
+        (&first["text"], &first["number"]),
+        (&Value::from(builtin), &Value::from(1))
+    );
+    assert_eq!(
+        send(address, "GET", &format!("{path}/999999"), &[], None).0,
+        404
+    );
+    // An editor opened before the save can't overwrite it.
+    assert_eq!(send(address, "POST", path, &page, Some(&edit)).0, 409);
+    let activate = |version: i64, expected: i64, headers: &[(&str, &str)]| {
+        send(
+            address,
+            "POST",
+            &format!("/api/prompts/writer/activate/{version}"),
+            headers,
+            Some(&serde_json::json!({"expected": expected})),
+        )
+    };
+    assert_eq!(activate(shipped, mine, &[]).0, 403);
+    // A page that still shows v1 active can't revert over v2.
+    let (status, body) = activate(shipped, shipped, &page);
+    assert_eq!(status, 409);
+    assert!(String::from_utf8_lossy(&body).contains("Another version became active"));
+    let reverted = json_body(activate(shipped, mine, &page), 200);
+    assert_eq!(reverted["active"]["id"], shipped);
+    assert_eq!(
+        store
+            .run_prompt("console-run", "writer")
+            .unwrap()
+            .unwrap()
+            .id,
+        shipped,
+        "the next run uses the reverted version"
+    );
+    assert_eq!(activate(999_999, shipped, &page).0, 404);
+    assert_eq!(
+        send(
+            address,
+            "POST",
+            "/api/prompts/nobody/versions",
+            &page,
+            Some(&edit)
+        )
+        .0,
+        404
+    );
+    // Two saves from the same base: one lands, the other is refused.
+    let base = shipped;
+    let racers: Vec<_> = (0..2)
+        .map(|n| {
+            std::thread::spawn(move || {
+                let edit = serde_json::json!({"text": format!("Racer {n}."), "note": "Race.", "base": base});
+                send(
+                    address,
+                    "POST",
+                    "/api/prompts/writer/versions",
+                    &[("X-TL3-Console", "1")],
+                    Some(&edit),
+                )
+                .0
+            })
+        })
+        .collect();
+    let mut statuses: Vec<u16> = racers.into_iter().map(|r| r.join().unwrap()).collect();
+    statuses.sort();
+    assert_eq!(statuses, [201, 409]);
+    let raced = json_body(send(address, "GET", "/api/prompts/writer", &[], None), 200);
+    assert_eq!(raced["versions"].as_array().unwrap().len(), 3);
+    let current = raced["active"]["id"].as_i64().unwrap();
+    // Limits: an oversized body is refused before it is read; a long note or
+    // prompt within it is refused by the store.
+    let huge =
+        serde_json::json!({"text": "t".repeat(400 * 1024), "note": "Huge.", "base": current});
+    assert_eq!(send(address, "POST", path, &page, Some(&huge)).0, 413);
+    let long_text = serde_json::json!({"text": "t".repeat(tl3_store::TEXT_LIMIT + 1), "note": "Long.", "base": current});
+    assert_eq!(send(address, "POST", path, &page, Some(&long_text)).0, 422);
+    let long_note = serde_json::json!({"text": "Text.", "note": "n".repeat(tl3_store::NOTE_LIMIT + 1), "base": current});
+    assert_eq!(send(address, "POST", path, &page, Some(&long_note)).0, 422);
+    let after = json_body(send(address, "GET", path, &[], None), 200);
+    assert_eq!(after.as_array().unwrap().len(), 3, "nothing was saved");
+    // A deploy ships a changed built-in while Rob's version is active.
+    json_body(activate(mine, current, &page), 200);
+    store
+        .seed_prompts(&[("writer", "Write, second release.")])
+        .unwrap();
+    let flagged = json_body(send(address, "GET", "/api/prompts/writer", &[], None), 200);
+    assert_eq!(flagged["active"]["id"], mine);
+    assert_eq!(flagged["builtin_update"]["text"], "Write, second release.");
+    let update = flagged["builtin_update"]["id"].as_i64().unwrap();
+    let roles = json_body(send(address, "GET", "/api/prompts", &[], None), 200);
+    let writer = roles
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["role"] == "writer")
+        .unwrap();
+    assert_eq!(writer["builtin_update"], true);
+    let keep = format!("/api/prompts/writer/keep/{update}");
+    assert_eq!(send(address, "POST", &keep, &[], None).0, 403);
+    let kept = json_body(send(address, "POST", &keep, &page, None), 200);
+    assert_eq!(
+        (&kept["active"]["id"], &kept["builtin_update"]),
+        (&Value::from(mine), &Value::Null)
+    );
+    // Postgres drops the console's session; the next save opens a new one
+    // first and lands once.
+    raw(&settings)
+        .execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = $1 AND query NOT ILIKE 'LISTEN%'",
+            &[&login],
+        )
+        .unwrap();
+    let again = serde_json::json!({"text": "After a restart.", "note": "Reconnect.", "base": mine});
+    let reconnected = json_body(send(address, "POST", path, &page, Some(&again)), 201);
+    assert_eq!(reconnected["active"]["text"], "After a restart.");
+    assert_eq!(reconnected["versions"].as_array().unwrap().len(), 5);
+    // A store ahead of the pin still serves prompts, as it serves the board.
+    raw(&settings)
+        .execute(
+            "INSERT INTO tl3_schema_migrations VALUES (999, 'SELECT 1')",
+            &[],
+        )
+        .unwrap();
+    let ahead = start(&console_store);
+    json_body(
+        send(ahead.address(), "GET", "/api/prompts/writer", &[], None),
+        200,
+    );
+    raw(&settings)
+        .execute("DELETE FROM tl3_schema_migrations WHERE version = 999", &[])
+        .unwrap();
     database
 }

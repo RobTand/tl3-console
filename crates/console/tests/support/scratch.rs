@@ -1,4 +1,4 @@
-// Copied from RobTand/trustladderiii crates/store/tests/support at 43f6506d. Keep in step when the TL3 pin moves.
+// Copied from RobTand/trustladderiii crates/store/tests/support/scratch.rs at 2220efd9e9e302774b986c69736cdbe338b7c1cc.
 use rustix::{
     io::Errno,
     process::{Pid, geteuid, test_kill_process},

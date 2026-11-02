@@ -56,6 +56,7 @@ fn main() {
             title: "Seed request".into(),
             actor: 24923402,
             label: "tl3".into(),
+            labels: vec![],
         })
         .unwrap();
     while controller.drive_once().unwrap() {}

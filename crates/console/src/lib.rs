@@ -11,6 +11,7 @@ pub mod config;
 mod feed;
 pub mod hidden;
 mod hosts;
+mod prompts;
 mod rebuild;
 pub mod schema;
 mod server;
@@ -133,6 +134,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         sessions: sessions::Sessions::new(case_file::SESSIONS),
         hidden: hidden.clone(),
     };
+    let prompt_store = store.clone();
     let filer = commands::router(store.clone(), hidden.clone(), case_files.sessions.clone());
     {
         let (store, rebuilds, connected) = (store.clone(), rebuilds.clone(), connected.clone());
@@ -195,6 +197,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         published,
         &assets,
         case_file::routes(case_files).merge(filer),
+        prompt_store,
         hosts,
     );
     supervisor.spawn("http", move || {
