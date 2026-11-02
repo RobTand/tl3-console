@@ -1,5 +1,28 @@
 // Generated from the console's Rust types by crates/console/src/api.rs. Do not edit.
 
+export type Postmortem = { id: number, node_id: string, trigger: string, reason: PostmortemReason, sample_share: number | null, repo: string, issue: number, title: string, status: PostmortemStatus, owed_ms: number, started_ms: number | null, finished_ms: number | null, failed_ms: number | null, failure: string | null, run_key: string | null, rubric_version: number | null, model: string | null, cause: PostmortemCause | null, summary: string | null, timeline: unknown, process_failures: unknown, grades: unknown, notes: string | null, recommendations: Array<Recommendation>, };
+
+/**
+ * Keyset pages keep reads bounded even on requests with many triggers.
+ */
+export type PostmortemPage = { postmortems: Array<Postmortem>, next_before: number | null, };
+
+export type RequestPostmortems = { postmortems: Array<Postmortem>, grades: Array<CodeGrade>, next_before: number | null, next_grade_before: number | null, active: boolean, };
+
+export type CodeGrade = { id: number, node_id: string, trigger: string, rubric_version: number, dimension: string, grade: number | null, fact: unknown, recorded_ms: number, };
+
+export type Recommendation = { id: number, fingerprint: string, rank: number, phase: string, kind: string, target: string, operation: string, before: string, after: string, evidence: string, effect: string, 
+/**
+ * Distinct visible postmortems sharing this fingerprint, across all pages.
+ */
+seen_in: number, };
+
+export type PostmortemStatus = "owed" | "running" | "done" | "failed";
+
+export type PostmortemReason = "needed_fix" | "retry" | "escalation" | "closed_without_merge" | "sampled" | "rob_asked";
+
+export type PostmortemCause = "tl3" | "outside";
+
 export type Board = { 
 /**
  * The controller revision this board shows.
@@ -272,7 +295,7 @@ export type AnswerKind = "continue" | "stop" | "retry" | "mark_handled" | "try_a
  */
 export type Detail = "text" | "guidance" | "amount";
 
-export type Action = { "kind": "pause", } | { "kind": "resume", } | { "kind": "stop", } | { "kind": "restart", } | { "kind": "clear_incident", incident: string, } | { "kind": "answer", question: number, choice: Choice, } | { "kind": "defer", question: number, } | { "kind": "comment", text: string, };
+export type Action = { "kind": "pause", } | { "kind": "resume", } | { "kind": "stop", } | { "kind": "restart", } | { "kind": "clear_incident", incident: string, } | { "kind": "answer", question: number, choice: Choice, } | { "kind": "defer", question: number, } | { "kind": "comment", text: string, } | { "kind": "postmortem", };
 
 /**
  * One of a question's options, with the details it needs from Rob.
