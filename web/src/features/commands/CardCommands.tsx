@@ -73,7 +73,7 @@ function Steering({ card, compact }: { card: Card; compact: boolean }) {
     if (actions.length === 0 && card.incidents.length === 0) return null;
     return (
       <>
-        <DropdownMenu.Root>
+        <DropdownMenu.Root modal={false}>
           <DropdownMenu.Trigger ref={menu} aria-label="Actions" className={`${BUTTON} px-1.5`}>
             <span aria-hidden="true">⋯</span>
           </DropdownMenu.Trigger>
@@ -82,9 +82,11 @@ function Steering({ card, compact }: { card: Card; compact: boolean }) {
               align="end"
               sideOffset={4}
               onCloseAutoFocus={(event) => {
+                // Radix returns focus after the menu closes; send it to the confirmation instead.
                 if (arming.current) {
                   arming.current = false;
                   event.preventDefault();
+                  confirm.current?.focus();
                 }
               }}
               className="z-10 min-w-36 rounded-md border border-border bg-surface p-1 text-xs shadow-lg"

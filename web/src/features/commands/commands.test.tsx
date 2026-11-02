@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import type { Action, CardQuestion, CommandRecord } from "../../api/types.gen";
@@ -255,13 +255,14 @@ describe("compact cards", () => {
     const items = screen.getAllByRole("menuitem").map((item) => item.textContent);
     expect(items).toEqual(["Pause", "Stop", "Restart", "Clear incident 0.workers.transport"]);
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Confirm pause" })).toHaveFocus();
+    // The menu hands focus back once it has closed.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm pause" })).toHaveFocus());
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(menu).toHaveFocus();
     expect(filed).toEqual([]);
     await user.keyboard("{Enter}");
     await user.keyboard("{ArrowDown}{Enter}");
-    expect(screen.getByRole("button", { name: "Confirm stop" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm stop" })).toHaveFocus());
     await user.keyboard("{Enter}");
     expect(filed.map((command) => command.action)).toEqual([{ kind: "stop" }]);
     expect(menu).toHaveFocus();
