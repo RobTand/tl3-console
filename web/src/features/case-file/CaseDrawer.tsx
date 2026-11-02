@@ -15,6 +15,7 @@ import type {
   StageChange,
   WorkerRun,
 } from "../../api/types.gen";
+import { IssueLink } from "../../components/IssueLink";
 import { elapsed } from "../../time";
 import { useCaseFile } from "./live";
 
@@ -119,8 +120,7 @@ function Header(props: {
     // The right padding keeps a long title clear of the drawer's close button.
     <header className="pt-4 pr-12 pb-3 pl-4">
       <p className="flex items-center gap-1.5 text-2xs text-muted">
-        <span>{card.repo}</span>
-        <span className="font-mono text-faint">#{card.issue}</span>
+        <IssueLink repo={card.repo} issue={card.issue} />
         <Chip tone="bg-surface-2 text-muted">{COLUMNS[card.column]}</Chip>
         {card.ending !== null && <Chip tone="bg-surface-2 text-muted">{ENDINGS[card.ending]}</Chip>}
       </p>

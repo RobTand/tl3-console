@@ -233,6 +233,7 @@ fn main() {
             .unwrap(),
             models: Some(config.models),
             public_hosts: vec![],
+            hidden: Default::default(),
         },
     )
     .unwrap();
