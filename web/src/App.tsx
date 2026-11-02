@@ -4,7 +4,9 @@ import { useLiveBoard } from "./api/live";
 import { BoardColumn } from "./components/BoardColumn";
 import { FlowStrip } from "./components/FlowStrip";
 import { Status } from "./components/Status";
+import { PromptsPage } from "./features/prompts/PromptsPage";
 import { filterCards } from "./filter";
+import { href, useRoute, type Route } from "./route";
 import { useTheme, type Theme } from "./theme";
 import { useNow } from "./time";
 
@@ -73,7 +75,29 @@ function ThemeSwitch() {
   );
 }
 
+function Pages({ route }: { route: Route }) {
+  const pages: Array<[Route, string]> = [
+    [{ page: "board" }, "Board"],
+    [{ page: "prompts", role: null }, "Prompts"],
+  ];
+  return (
+    <nav aria-label="Pages" className="inline-flex h-8 rounded-md border border-border bg-surface p-0.5">
+      {pages.map(([target, label]) => (
+        <a
+          key={label}
+          href={href(target)}
+          aria-current={target.page === route.page ? "page" : undefined}
+          className="inline-flex items-center rounded px-2.5 text-xs text-muted aria-[current=page]:bg-surface-2 aria-[current=page]:text-text"
+        >
+          {label}
+        </a>
+      ))}
+    </nav>
+  );
+}
+
 export function App() {
+  const route = useRoute();
   const { board, connection } = useLiveBoard();
   const now = useNow();
   const [repo, setRepo] = useState<string | null>(null);
@@ -86,21 +110,28 @@ export function App() {
         <h1 className="flex items-baseline gap-2 text-base font-semibold">
           TL3 <span className="font-normal text-muted">console</span>
         </h1>
+        <Pages route={route} />
         <Status connection={connection} builtAt={board?.built_at_ms ?? null} />
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <RepoFilter repos={repos} value={repo} onChange={setRepo} />
-          <input
-            type="search"
-            aria-label="Search by issue or title"
-            placeholder="Issue # or title"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            className="h-8 w-48 rounded-md border border-border bg-surface px-2.5 text-sm text-text placeholder:text-faint hover:border-border-strong"
-          />
+          {route.page === "board" && (
+            <>
+              <RepoFilter repos={repos} value={repo} onChange={setRepo} />
+              <input
+                type="search"
+                aria-label="Search by issue or title"
+                placeholder="Issue # or title"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                className="h-8 w-48 rounded-md border border-border bg-surface px-2.5 text-sm text-text placeholder:text-faint hover:border-border-strong"
+              />
+            </>
+          )}
           <ThemeSwitch />
         </div>
       </header>
-      {board ? (
+      {route.page === "prompts" ? (
+        <PromptsPage role={route.role} />
+      ) : board ? (
         <>
           <FlowStrip flow={board.flow} />
           {board.unassigned_incidents.length > 0 && (
