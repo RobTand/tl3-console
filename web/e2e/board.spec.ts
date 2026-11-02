@@ -51,7 +51,7 @@ test("board screenshots in both themes", async ({ page }) => {
   const fixture = await startFixture();
   try {
     // Wide enough to show every column.
-    await page.setViewportSize({ width: 2720, height: 1100 });
+    await page.setViewportSize({ width: 3000, height: 1100 });
     for (const scheme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme: scheme });
       await page.goto(fixture.url);

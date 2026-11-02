@@ -262,7 +262,9 @@ fn main() {
             }),
         )
         .unwrap();
-    while column(&settings, "tl3-sandbox", STOPPED) != Column::Backlog
+    while !controller.world().unwrap().nodes[stopped as usize]
+        .phase
+        .is_closed()
         && controller.drive_once().unwrap()
     {}
     controller
