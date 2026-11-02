@@ -1477,7 +1477,7 @@ fn prompts_edit_and_revert_through_the_api(database: &mut Database, assets: &Pat
     let mut store = Store::open(&settings).unwrap();
     tl3_controller::prompts::seed(&mut store).unwrap();
     let login = "tl3_console_prompts";
-    grant_reader(&settings, login, settings.password_file.as_deref().unwrap()).unwrap();
+    tl3_store::grant_reader(&settings, login, settings.password_file.as_deref().unwrap()).unwrap();
     let console_store = tl3_config::Store {
         user: login.into(),
         ..settings.clone()
