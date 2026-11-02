@@ -187,6 +187,9 @@ describe("CardCommands", () => {
     await user.type(screen.getByLabelText("Your answer"), "Retry after the mirror is back");
     await user.click(screen.getByRole("button", { name: "Send answer" }));
     expect(filed[0]!.action).toEqual({ kind: "comment", text: "Retry after the mirror is back" });
+    // The box clears and its button disables; focus stays in the box, not on the page.
+    expect(screen.getByLabelText("Your answer")).toHaveValue("");
+    expect(screen.getByLabelText("Your answer")).toHaveFocus();
   });
 });
 
