@@ -8,8 +8,8 @@ export function withFinalNewline(text: string): string {
 
 /** Lines added and removed between two texts, from their longest common subsequence of lines. */
 export function lineChanges(before: string, after: string): { added: number; removed: number } {
-  const a = before.split("\n");
-  const b = after.split("\n");
+  const a = withFinalNewline(before).split("\n");
+  const b = withFinalNewline(after).split("\n");
   let start = 0;
   while (start < a.length && start < b.length && a[start] === b[start]) start++;
   let endA = a.length;

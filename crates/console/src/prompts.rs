@@ -6,7 +6,7 @@ use crate::api::{
 };
 use axum::{
     Json, Router,
-    extract::{Path, State, rejection::JsonRejection},
+    extract::{DefaultBodyLimit, Path, State, rejection::JsonRejection},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -20,7 +20,6 @@ const AUTHOR: &str = "Rob";
 /// the console never grants, so another page can't make these writes.
 pub const WRITE_HEADER: &str = "x-tl3-console";
 /// A write's request body: the longest prompt, escaped as JSON, and a note.
-#[allow(dead_code)]
 const MAX_BODY_BYTES: usize = tl3_store::TEXT_LIMIT + 64 * 1024;
 
 #[derive(Clone)]
@@ -34,8 +33,10 @@ pub(crate) fn routes(settings: tl3_config::Store) -> Router {
         .route("/api/prompts", get(roles))
         .route("/api/prompts/{role}", get(role))
         .route("/api/prompts/{role}/versions", get(versions).post(save))
+        .route("/api/prompts/{role}/versions/{version}", get(version))
         .route("/api/prompts/{role}/activate/{version}", post(activate))
         .route("/api/prompts/{role}/keep/{version}", post(keep))
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(Session {
             settings,
             prompts: Arc::default(),
@@ -78,7 +79,6 @@ async fn versions(State(session): State<Session>, Path(role): Path<String>) -> R
     }
 }
 
-#[allow(dead_code)]
 async fn version(
     State(session): State<Session>,
     Path((role, id)): Path<(String, i64)>,
