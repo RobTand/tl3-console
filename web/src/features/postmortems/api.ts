@@ -110,7 +110,7 @@ export function usePostmortemList(filters: string) {
   return useInfiniteQuery({
     queryKey: ["postmortems", "list", filters],
     initialPageParam: initial,
-    queryFn: ({ pageParam, signal }) =>
+    queryFn: ({ pageParam, signal }: { pageParam: number | null; signal: AbortSignal }) =>
       read(`/api/postmortems?${filters}${pageParam === null ? "" : `&before=${pageParam}`}`, signal, page),
     getNextPageParam: (last) => last.next_before ?? undefined,
     staleTime: Infinity,

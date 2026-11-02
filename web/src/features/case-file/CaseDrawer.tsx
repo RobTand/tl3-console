@@ -407,7 +407,8 @@ export function CaseFileView(props: {
   postmortem?: ReactNode;
 }) {
   const { file, now } = props;
-  const details = <>
+  const details = (
+    <>
       <Counters card={file.card} />
       {file.question !== null && <Question question={file.question} />}
       <Timeline timeline={file.timeline} />
@@ -416,7 +417,8 @@ export function CaseFileView(props: {
       {file.blocked.length > 0 && <Blocked blocked={file.blocked} />}
       {file.children.length > 0 && <Children items={file.children} />}
       {file.summary !== null && <Summary summary={file.summary} />}
-  </>;
+    </>
+  );
   return (
     <article className="text-text">
       <Header
@@ -425,13 +427,20 @@ export function CaseFileView(props: {
         title={props.title ?? ((heading) => heading)}
         actions={props.actions}
       />
-      {props.postmortem ? <Tabs.Root defaultValue={new URLSearchParams(window.location.search).get("tab") === "postmortem" ? "postmortem" : "case"}>
-        <Tabs.List aria-label="Case file tabs" className="flex gap-1 border-t border-border px-4 pt-2">
-          {[["case", "Case file"], ["postmortem", "Postmortem"]].map(([value, label]) => <Tabs.Trigger key={value} value={value ?? "case"} className="rounded-t px-3 py-2 text-xs text-muted data-[state=active]:bg-surface-2 data-[state=active]:text-text">{label}</Tabs.Trigger>)}
-        </Tabs.List>
-        <Tabs.Content value="case">{details}</Tabs.Content>
-        <Tabs.Content value="postmortem">{props.postmortem}</Tabs.Content>
-      </Tabs.Root> : details}
+      {props.postmortem ? (
+        <Tabs.Root defaultValue={new URLSearchParams(window.location.search).get("tab") === "postmortem" ? "postmortem" : "case"}>
+          <Tabs.List aria-label="Case file tabs" className="flex gap-1 border-t border-border px-4 pt-2">
+            <Tabs.Trigger value="case" className="rounded-t px-3 py-2 text-xs text-muted data-[state=active]:bg-surface-2 data-[state=active]:text-text">
+              Case file
+            </Tabs.Trigger>
+            <Tabs.Trigger value="postmortem" className="rounded-t px-3 py-2 text-xs text-muted data-[state=active]:bg-surface-2 data-[state=active]:text-text">
+              Postmortem
+            </Tabs.Trigger>
+          </Tabs.List>
+          <Tabs.Content value="case">{details}</Tabs.Content>
+          <Tabs.Content value="postmortem">{props.postmortem}</Tabs.Content>
+        </Tabs.Root>
+      ) : details}
     </article>
   );
 }

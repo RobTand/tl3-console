@@ -221,9 +221,8 @@ async fn respond(views: Views, id: Option<u64>, filters: Filters) -> Response {
         let mut tx = session.transaction()?;
         // Filters without their own upstream index are still bounded in time.
         tx.batch_execute("SET LOCAL statement_timeout = '3s'; SET LOCAL timezone = 'UTC'").map_err(tl3_store::Error::from)?;
-        if let Some(id) = id {
-            if views.hidden.hides(&mut tx, id)? || tx.query_opt("SELECT 1 FROM tl3_world WHERE table_name = 'requests' AND row_id = $1", &[&id.to_string()]).map_err(tl3_store::Error::from)?.is_none() { return Ok(None); }
-        }
+        if let Some(id) = id
+            && (views.hidden.hides(&mut tx, id)? || tx.query_opt("SELECT 1 FROM tl3_world WHERE table_name = 'requests' AND row_id = $1", &[&id.to_string()]).map_err(tl3_store::Error::from)?.is_none()) { return Ok(None); }
         let hidden = views.hidden.names();
         let page = read_page(&mut tx, id, &filters, &hidden)?;
         let result = if let Some(id) = id {

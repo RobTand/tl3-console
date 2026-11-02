@@ -1783,7 +1783,8 @@ fn postmortem_scenarios() {
         assert_eq!(status, 200, "{path}: {}", String::from_utf8_lossy(&body));
         serde_json::from_slice::<Value>(&body).unwrap()
     };
-    let tests: Vec<(&str, Box<dyn FnMut() + '_>)> = vec![
+    type Scenario<'a> = (&'static str, Box<dyn FnMut() + 'a>);
+    let tests: Vec<Scenario<'_>> = vec![
         (
             "postmortems_request_all_triggers_and_grades",
             Box::new(|| {
