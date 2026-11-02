@@ -10,6 +10,7 @@ export const COLUMNS: Array<[Column, string]> = [
   ["Merging", "Merging"],
   ["NeedsRob", "Needs Rob"],
   ["Done", "Done"],
+  ["Cancelled", "Cancelled"],
 ];
 
 export function card(fields: Partial<Card> & { id: number }): Card {
@@ -46,7 +47,7 @@ export function board(cards: Card[]): Board {
         label,
         count: cards.filter((c) => c.column === column).length,
       })),
-      in_flight: cards.filter((c) => c.column !== "Done").length,
+      in_flight: cards.filter((c) => !["Backlog", "Done", "Cancelled"].includes(c.column)).length,
       merged_last_hour: 0,
       merged_last_day: 0,
     },

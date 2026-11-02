@@ -62,6 +62,40 @@ describe("BoardCard", () => {
     expect(screen.queryByText(/·/)).toBeNull();
   });
 
+  it("marks a stopped request in the backlog with one Stopped badge", () => {
+    render(
+      <BoardCard
+        now={1_000}
+        card={card({
+          id: 2,
+          column: "Backlog",
+          phase: "Closed: stopped",
+          ending: "Stopped",
+          role: null,
+          model: null,
+          badges: ["Stopped"],
+        })}
+      />,
+    );
+    const badges = within(screen.getByRole("list", { name: "Badges" }));
+    expect(badges.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Stopped"]);
+    expect(badges.getByText("Stopped")).toHaveAttribute("title", expect.stringMatching(/restart/i));
+  });
+
+  it("names the ending of cancelled and already-done requests", () => {
+    for (const [ending, label] of [
+      ["Duplicate", "Duplicate"],
+      ["NotActionable", "Not actionable"],
+      ["AlreadyDone", "Already done"],
+    ] as const) {
+      const { unmount } = render(
+        <BoardCard now={1_000} card={card({ id: 3, column: "Cancelled", ending, phase: `Closed: ${label}`, badges: [] })} />,
+      );
+      expect(within(screen.getByRole("list", { name: "Badges" })).getByText(label)).toBeVisible();
+      unmount();
+    }
+  });
+
   it("renders hostile titles as text", () => {
     render(<BoardCard now={1_000} card={card({ id: 1, title: "<img src=x onerror=alert(1)>" })} />);
     expect(screen.getByText("<img src=x onerror=alert(1)>")).toBeVisible();

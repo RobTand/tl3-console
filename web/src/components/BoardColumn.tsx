@@ -2,9 +2,9 @@ import { useId, type ReactNode } from "react";
 import type { Card, Column } from "../api/types.gen";
 import { BoardCard } from "./BoardCard";
 
-/** Done shows the newest endings first; every other column keeps request order. */
+/** Done and Cancelled show the newest endings first; every other column keeps request order. */
 function ordered(column: Column, cards: Card[]): Card[] {
-  return column === "Done"
+  return column === "Done" || column === "Cancelled"
     ? [...cards].sort((a, b) => (b.phase_since_ms ?? 0) - (a.phase_since_ms ?? 0) || b.id - a.id)
     : [...cards].sort((a, b) => a.id - b.id);
 }
