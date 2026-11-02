@@ -1517,12 +1517,12 @@ fn prompt_store_errors_have_actionable_responses(assets: &Path) {
     };
     let original = sessions(&mut admin);
     admin
-        .batch_execute("REVOKE INSERT ON tl3_prompt_versions FROM console_prompt_errors")
+        .batch_execute("REVOKE tl3_prompt_editor FROM console_prompt_errors")
         .unwrap();
     let denied = send(address, "POST", path, &page, Some(&edit));
     let after_denied = sessions(&mut admin);
     admin
-        .batch_execute("GRANT INSERT ON tl3_prompt_versions TO console_prompt_errors")
+        .batch_execute("GRANT tl3_prompt_editor TO console_prompt_errors")
         .unwrap();
     let nul = serde_json::json!({"text": "Bad\0text", "note": "Why.", "base": base});
     let invalid = send(address, "POST", path, &page, Some(&nul));
