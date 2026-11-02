@@ -285,6 +285,7 @@ fn case_file_on_a_store_ahead_of_the_pin(settings: &tl3_config::Store, assets: &
             assets: assets.into(),
             models: None,
             links: Default::default(),
+            public_hosts: vec![],
         },
     )
     .unwrap();
