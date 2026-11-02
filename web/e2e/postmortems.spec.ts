@@ -62,7 +62,7 @@ test("postmortem screenshots in light and dark", async ({ page }) => {
       await page.screenshot({ path: `${process.env.TL3_SCREENSHOTS}/postmortem-drawer-${scheme}.png` });
       await page.keyboard.press("Escape");
       await page.getByRole("link", { name: "Shard the GPU benchmark queue by device class" }).first().click();
-      await expect(page.getByRole("region", { name: "What went wrong" })).toBeVisible();
+      await expect(page.getByRole("region", { name: "What went wrong" }).first()).toBeVisible();
       await page.screenshot({ path: `${process.env.TL3_SCREENSHOTS}/postmortem-findings-${scheme}.png` });
     }
   } finally {
