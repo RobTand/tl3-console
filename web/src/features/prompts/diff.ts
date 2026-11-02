@@ -1,3 +1,11 @@
+/**
+ * The text as the diff compares it. A last line without a newline would show
+ * as changed when a line is added after it, so both sides end with one.
+ */
+export function withFinalNewline(text: string): string {
+  return text.endsWith("\n") ? text : `${text}\n`;
+}
+
 /** Lines added and removed between two texts, from their longest common subsequence of lines. */
 export function lineChanges(before: string, after: string): { added: number; removed: number } {
   const a = before.split("\n");

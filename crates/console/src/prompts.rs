@@ -1,10 +1,12 @@
 //! Role prompt versions (PRD #327, C5): the console's only writes. Its login
 //! may add versions and move the active pointers, and nothing else.
 
-use crate::api::{NewPromptVersion, PromptRole, PromptVersion, RolePrompt};
+use crate::api::{
+    ActivateVersion, NewPromptVersion, PromptRole, PromptSummary, PromptVersion, RolePrompt,
+};
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, State, rejection::JsonRejection},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -17,6 +19,9 @@ const AUTHOR: &str = "Rob";
 /// Browsers send a custom header cross-site only after a CORS preflight, which
 /// the console never grants, so another page can't make these writes.
 pub const WRITE_HEADER: &str = "x-tl3-console";
+/// A write's request body: the longest prompt, escaped as JSON, and a note.
+#[allow(dead_code)]
+const MAX_BODY_BYTES: usize = tl3_store::TEXT_LIMIT + 64 * 1024;
 
 #[derive(Clone)]
 struct Session {
@@ -42,14 +47,11 @@ async fn roles(State(session): State<Session>) -> Response {
         Ok(roles) => Json(
             roles
                 .iter()
-                .map(|role| {
-                    let active = role.version(role.active).expect("the active version");
-                    PromptRole {
-                        role: role.role.clone(),
-                        active_number: active.number,
-                        active_builtin: active.builtin,
-                        builtin_update: role.builtin_update.is_some(),
-                    }
+                .map(|role| PromptRole {
+                    role: role.role.clone(),
+                    active_number: role.active.number,
+                    active_builtin: role.active.builtin,
+                    builtin_update: role.builtin_update.is_some(),
                 })
                 .collect::<Vec<_>>(),
         )
@@ -76,15 +78,33 @@ async fn versions(State(session): State<Session>, Path(role): Path<String>) -> R
     }
 }
 
+#[allow(dead_code)]
+async fn version(
+    State(session): State<Session>,
+    Path((role, id)): Path<(String, i64)>,
+) -> Response {
+    let name = role.clone();
+    match session.run(move |prompts| prompts.version(&name, id)).await {
+        Ok(Some(found)) => Json(full(found)).into_response(),
+        Ok(None) => refused(&role, Refusal::UnknownVersion),
+        Err(failure) => failure.into_response(),
+    }
+}
+
 async fn save(
     State(session): State<Session>,
     Path(role): Path<String>,
     headers: HeaderMap,
-    Json(edit): Json<NewPromptVersion>,
+    edit: Result<Json<NewPromptVersion>, JsonRejection>,
 ) -> Response {
+    // The origin check comes first, so a foreign page learns nothing from the body.
     if let Err(failure) = same_origin(&headers) {
         return failure.into_response();
     }
+    let Json(edit) = match edit {
+        Ok(edit) => edit,
+        Err(rejection) => return rejection.into_response(),
+    };
     let name = role.clone();
     let result = session
         .run(move |prompts| prompts.save(&name, &edit.text, &edit.note, AUTHOR, edit.base))
@@ -96,15 +116,26 @@ async fn activate(
     State(session): State<Session>,
     Path((role, version)): Path<(String, i64)>,
     headers: HeaderMap,
+    seen: Result<Json<ActivateVersion>, JsonRejection>,
 ) -> Response {
     if let Err(failure) = same_origin(&headers) {
         return failure.into_response();
     }
+    let Json(seen) = match seen {
+        Ok(seen) => seen,
+        Err(rejection) => return rejection.into_response(),
+    };
     let name = role.clone();
     let result = session
-        .run(move |prompts| prompts.activate(&name, version, AUTHOR))
+        .run(move |prompts| prompts.activate(&name, version, AUTHOR, seen.expected))
         .await;
-    edited(&role, result, StatusCode::OK)
+    match result {
+        Ok(Err(Refusal::Stale { .. })) => text(
+            StatusCode::CONFLICT,
+            "Another version became active after this page loaded. Check the history, then choose again.",
+        ),
+        result => edited(&role, result, StatusCode::OK),
+    }
 }
 
 async fn keep(
@@ -123,28 +154,30 @@ async fn keep(
 }
 
 impl Session {
-    /// Run store work off the async threads, on one reused session. A broken
-    /// session is replaced once.
+    /// Run store work off the async threads, on one reused session. A session
+    /// Postgres dropped is replaced before the work is sent. The work itself
+    /// runs once: a failure at commit may still have committed, so a retry
+    /// could save twice or refuse a save that succeeded.
     async fn run<T: Send + 'static>(
         &self,
-        work: impl Fn(&mut Prompts) -> tl3_store::Result<T> + Send + 'static,
+        work: impl FnOnce(&mut Prompts) -> tl3_store::Result<T> + Send + 'static,
     ) -> Result<T, Failure> {
         let session = self.clone();
         let done = tokio::task::spawn_blocking(move || {
             let mut slot = session.prompts.lock().unwrap_or_else(|e| e.into_inner());
-            let mut retried = false;
-            loop {
-                if slot.is_none() {
-                    *slot = Some(Prompts::open(&session.settings)?);
-                }
-                match work(slot.as_mut().expect("an open session")) {
-                    Err(_) if !retried => {
-                        retried = true;
-                        *slot = None;
-                    }
-                    result => return result,
-                }
+            if slot.as_mut().is_some_and(|prompts| !prompts.is_live()) {
+                *slot = None;
             }
+            if slot.is_none() {
+                // The console's migration check, as every store session has.
+                crate::schema::Session::open(&session.settings, "prompts")?;
+                *slot = Some(Prompts::open(&session.settings)?);
+            }
+            let result = work(slot.as_mut().expect("an open session"));
+            if result.is_err() {
+                *slot = None;
+            }
+            result
         })
         .await;
         match done {
@@ -227,13 +260,23 @@ fn refused(role: &str, refusal: Refusal) -> Response {
         ),
         Refusal::Stale { .. } => (
             StatusCode::CONFLICT,
-            "Another version became active while you edited. Reload to see it before saving."
-                .into(),
+            "Another version became active while you edited.".into(),
         ),
         Refusal::EmptyText => (StatusCode::BAD_REQUEST, "The prompt can't be empty.".into()),
         Refusal::EmptyNote => (
             StatusCode::BAD_REQUEST,
             "Add a note that says why you changed the prompt.".into(),
+        ),
+        Refusal::TextTooLong => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "The prompt is longer than {} KiB.",
+                tl3_store::TEXT_LIMIT / 1024
+            ),
+        ),
+        Refusal::NoteTooLong => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("Keep the note to {} characters.", tl3_store::NOTE_LIMIT),
         ),
         Refusal::NoUpdate => (
             StatusCode::CONFLICT,
@@ -252,20 +295,32 @@ fn text(status: StatusCode, message: &str) -> Response {
         .into_response()
 }
 
+fn full(version: tl3_store::PromptVersion) -> PromptVersion {
+    PromptVersion {
+        id: version.id,
+        number: version.number,
+        text: version.body,
+        builtin: version.builtin,
+        author: version.author,
+        note: version.note,
+        created_ms: version.created_ms,
+    }
+}
+
+/// The active version and a waiting update carry their text; the history doesn't.
 fn view(prompts: RolePrompts) -> RolePrompt {
     RolePrompt {
         role: prompts.role,
-        active: prompts.active,
+        active: full(prompts.active),
         activated_by: prompts.activated_by,
         activated_ms: prompts.activated_ms,
-        builtin_update: prompts.builtin_update,
+        builtin_update: prompts.builtin_update.map(full),
         versions: prompts
             .versions
             .into_iter()
-            .map(|version| PromptVersion {
+            .map(|version| PromptSummary {
                 id: version.id,
                 number: version.number,
-                text: version.body,
                 builtin: version.builtin,
                 author: version.author,
                 note: version.note,

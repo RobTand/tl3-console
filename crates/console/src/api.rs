@@ -37,16 +37,28 @@ pub struct PromptVersion {
     pub created_ms: i64,
 }
 
+/// A version in a role's history, without its text. Fetch the text from
+/// `GET /api/prompts/{role}/versions/{id}`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+pub struct PromptSummary {
+    pub id: i64,
+    pub number: i64,
+    pub builtin: bool,
+    pub author: String,
+    pub note: String,
+    pub created_ms: i64,
+}
+
 /// A role's prompt: the active version, its history, newest first, and a
 /// built-in version a deploy shipped while another stayed active.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 pub struct RolePrompt {
     pub role: String,
-    pub active: i64,
+    pub active: PromptVersion,
     pub activated_by: String,
     pub activated_ms: i64,
-    pub builtin_update: Option<i64>,
-    pub versions: Vec<PromptVersion>,
+    pub builtin_update: Option<PromptVersion>,
+    pub versions: Vec<PromptSummary>,
 }
 
 /// A role in the prompt list.
@@ -65,6 +77,13 @@ pub struct NewPromptVersion {
     pub text: String,
     pub note: String,
     pub base: i64,
+}
+
+/// `POST /api/prompts/{role}/activate/{version}`: `expected` is the version
+/// the page showed as active.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, TS)]
+pub struct ActivateVersion {
+    pub expected: i64,
 }
 
 /// The generated `web/src/api/types.gen.ts`.
@@ -100,9 +119,11 @@ pub fn typescript() -> String {
         (LinkKind::docs(), LinkKind::decl(&config)),
         (Link::docs(), Link::decl(&config)),
         (PromptVersion::docs(), PromptVersion::decl(&config)),
+        (PromptSummary::docs(), PromptSummary::decl(&config)),
         (RolePrompt::docs(), RolePrompt::decl(&config)),
         (PromptRole::docs(), PromptRole::decl(&config)),
         (NewPromptVersion::docs(), NewPromptVersion::decl(&config)),
+        (ActivateVersion::docs(), ActivateVersion::decl(&config)),
     ] {
         output.push('\n');
         output.push_str(&docs.unwrap_or_default());

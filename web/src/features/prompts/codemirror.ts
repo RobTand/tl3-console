@@ -12,6 +12,7 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+import { withFinalNewline } from "./diff";
 
 // Tailwind inlines its font tokens, so these repeat styles.css's stacks.
 const MONO = 'ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace';
@@ -48,6 +49,8 @@ const chrome = EditorView.theme({
     fontSize: "12px",
     padding: "2px 12px",
   },
+  // The merge view's own marks are a glyph few fonts carry.
+  ".cm-collapsedLines:before, .cm-collapsedLines:after": { content: "none" },
 });
 
 const markdownStyle = HighlightStyle.define([
@@ -88,12 +91,12 @@ export function editorState(text: string, label: string, onChange: (text: string
 /** `after` with `before`'s lines shown as deletions, read-only. */
 export function diffState(before: string, after: string, label: string): EditorState {
   return EditorState.create({
-    doc: after,
+    doc: withFinalNewline(after),
     extensions: [
       ...common(label),
       EditorState.readOnly.of(true),
       EditorView.editable.of(false),
-      unifiedMergeView({ original: before, mergeControls: false, collapseUnchanged: { margin: 3, minSize: 8 } }),
+      unifiedMergeView({ original: withFinalNewline(before), mergeControls: false, collapseUnchanged: { margin: 3, minSize: 8 } }),
     ],
   });
 }

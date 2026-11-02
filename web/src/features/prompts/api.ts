@@ -1,8 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { NewPromptVersion, PromptRole, RolePrompt } from "../../api/types.gen";
+import type { NewPromptVersion, PromptRole, PromptVersion, RolePrompt } from "../../api/types.gen";
 
 /** The console refuses writes without this header, which other sites can't send. */
 const WRITE_HEADER = { "X-TL3-Console": "1" };
+
+/** A refused request, with the console's reason. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
 
 async function call<T>(path: string, init?: { method: "POST"; body?: unknown }): Promise<T> {
   const response = await fetch(path, {
@@ -11,22 +21,30 @@ async function call<T>(path: string, init?: { method: "POST"; body?: unknown }):
     ...(init?.body === undefined ? {} : { body: JSON.stringify(init.body) }),
   });
   if (!response.ok) {
-    throw new Error((await response.text()).trim() || `${response.status} ${response.statusText}`);
+    const reason = (await response.text()).trim();
+    throw new ApiError(reason || `${response.status} ${response.statusText}`, response.status);
   }
   return (await response.json()) as T;
 }
 
-const roleKey = (role: string) => ["prompts", role] as const;
+export const roleKey = (role: string) => ["prompts", role] as const;
+const path = (role: string) => `/api/prompts/${encodeURIComponent(role)}`;
 
 export function usePromptRoles() {
   return useQuery({ queryKey: ["prompts"], queryFn: () => call<PromptRole[]>("/api/prompts") });
 }
 
-export function useRolePrompt(role: string | null) {
+export function useRolePrompt(role: string) {
+  return useQuery({ queryKey: roleKey(role), queryFn: () => call<RolePrompt>(path(role)) });
+}
+
+/** One version's text, fetched when the page first needs it. Versions never change. */
+export function usePromptVersion(role: string, id: number | null) {
   return useQuery({
-    queryKey: roleKey(role ?? ""),
-    queryFn: () => call<RolePrompt>(`/api/prompts/${encodeURIComponent(role!)}`),
-    enabled: role !== null,
+    queryKey: [...roleKey(role), "version", id] as const,
+    queryFn: () => call<PromptVersion>(`${path(role)}/versions/${id}`),
+    enabled: id !== null,
+    staleTime: Infinity,
   });
 }
 
@@ -39,18 +57,18 @@ export function usePromptEdits(role: string) {
       void client.invalidateQueries({ queryKey: ["prompts"], exact: true });
     },
   };
-  const path = `/api/prompts/${encodeURIComponent(role)}`;
   return {
     save: useMutation({
-      mutationFn: (edit: NewPromptVersion) => call<RolePrompt>(`${path}/versions`, { method: "POST", body: edit }),
+      mutationFn: (edit: NewPromptVersion) => call<RolePrompt>(`${path(role)}/versions`, { method: "POST", body: edit }),
       ...settle,
     }),
     activate: useMutation({
-      mutationFn: (version: number) => call<RolePrompt>(`${path}/activate/${version}`, { method: "POST" }),
+      mutationFn: ({ version, expected }: { version: number; expected: number }) =>
+        call<RolePrompt>(`${path(role)}/activate/${version}`, { method: "POST", body: { expected } }),
       ...settle,
     }),
     keep: useMutation({
-      mutationFn: (version: number) => call<RolePrompt>(`${path}/keep/${version}`, { method: "POST" }),
+      mutationFn: (version: number) => call<RolePrompt>(`${path(role)}/keep/${version}`, { method: "POST" }),
       ...settle,
     }),
   };

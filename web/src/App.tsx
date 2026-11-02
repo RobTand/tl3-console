@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { Select, ToggleGroup } from "radix-ui";
 import { useLiveBoard } from "./api/live";
 import { BoardColumn } from "./components/BoardColumn";
@@ -6,11 +6,15 @@ import { FlowStrip } from "./components/FlowStrip";
 import { Status } from "./components/Status";
 import { CaseDrawer } from "./features/case-file/CaseDrawer";
 import { useOpenRequest } from "./features/case-file/live";
-import { PromptsPage } from "./features/prompts/PromptsPage";
 import { filterCards } from "./filter";
 import { href, useRoute, type Route } from "./route";
 import { useTheme, type Theme } from "./theme";
 import { useNow } from "./time";
+
+// CodeMirror is most of the Prompts page's weight; the board never loads it.
+const PromptsPage = lazy(() =>
+  import("./features/prompts/PromptsPage").then((module) => ({ default: module.PromptsPage })),
+);
 
 const ALL_REPOS = "*";
 
@@ -133,7 +137,13 @@ export function App() {
         </div>
       </header>
       {route.page === "prompts" ? (
-        <PromptsPage role={route.role} />
+        <Suspense
+          fallback={
+            <main className="flex flex-1 items-center justify-center text-sm text-muted">Loading prompts…</main>
+          }
+        >
+          <PromptsPage role={route.role} />
+        </Suspense>
       ) : board ? (
         <>
           <FlowStrip flow={board.flow} />

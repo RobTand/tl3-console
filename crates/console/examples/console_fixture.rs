@@ -242,14 +242,14 @@ fn seed_prompts(settings: &tl3_config::Store) {
     tl3_controller::prompts::seed(&mut store).unwrap();
     let mut prompts = tl3_store::Prompts::open(settings).unwrap();
     let reviewer = prompts.role("reviewer").unwrap().unwrap();
-    let shipped = reviewer.version(reviewer.active).unwrap().body.clone();
+    let shipped = reviewer.active.body.clone();
     prompts
         .save(
             "reviewer",
             &format!("{shipped}\nBefore anything else, check that each new test fails without the change.\n"),
             "Ask reviewers to check that new tests fail first.",
             "Rob",
-            reviewer.active,
+            reviewer.active.id,
         )
         .unwrap()
         .unwrap();
