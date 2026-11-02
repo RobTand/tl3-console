@@ -280,7 +280,7 @@ export type AnswerKind = "continue" | "stop" | "retry" | "mark_handled" | "try_a
  */
 export type Detail = "text" | "guidance" | "amount";
 
-export type Action = { "kind": "pause", } | { "kind": "resume", } | { "kind": "stop", } | { "kind": "restart", } | { "kind": "clear_incident", incident: string, } | { "kind": "answer", question: number, choice: Choice, } | { "kind": "defer", question: number, } | { "kind": "comment", text: string, };
+export type Action = { "kind": "pause", } | { "kind": "resume", } | { "kind": "stop", } | { "kind": "restart", } | { "kind": "clear_incident", incident: string, } | { "kind": "answer", question: number, choice: Choice, } | { "kind": "defer", question: number, } | { "kind": "comment", text: string, } | { "kind": "postmortem", };
 
 /**
  * One of a question's options, with the details it needs from Rob.
