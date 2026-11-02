@@ -1,0 +1,15 @@
+load("@rules_python//python:py_test.bzl", "py_test")
+
+py_test(
+    name = "test_deploy",
+    size = "small",
+    srcs = [
+        "deploy.py",
+        "test_deploy.py",
+    ],
+    data = [
+        "deploy.sh",
+        "tl3-console.service",
+    ],
+    imports = ["."],
+)
