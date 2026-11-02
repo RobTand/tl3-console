@@ -5,6 +5,7 @@ import { BoardColumn } from "./components/BoardColumn";
 import { FlowStrip } from "./components/FlowStrip";
 import { Status } from "./components/Status";
 import { filterCards } from "./filter";
+import { CardCommands, CommandsProvider, DeferAll } from "./features/commands";
 import { useTheme, type Theme } from "./theme";
 import { useNow } from "./time";
 
@@ -74,13 +75,14 @@ function ThemeSwitch() {
 }
 
 export function App() {
-  const { board, connection } = useLiveBoard();
+  const { board, connection, commands } = useLiveBoard();
   const now = useNow();
   const [repo, setRepo] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const repos = useMemo(() => [...new Set(board?.cards.map((card) => card.repo))].sort(), [board]);
   const cards = useMemo(() => (board ? filterCards(board.cards, { repo, query }) : []), [board, repo, query]);
   return (
+    <CommandsProvider records={commands}>
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <h1 className="flex items-baseline gap-2 text-base font-semibold">
@@ -129,6 +131,10 @@ export function App() {
                   now={now}
                   cards={cards.filter((card) => card.column === column.column)}
                   {...(older > 0 ? { note: `${older} older ${older === 1 ? "ending" : "endings"} not shown` } : {})}
+                  cardExtras={(card) => <CardCommands card={card} />}
+                  {...(column.column === "NeedsRob"
+                    ? { action: <DeferAll cards={cards.filter((card) => card.question !== null)} /> }
+                    : {})}
                 />
               );
             })}
@@ -140,5 +146,6 @@ export function App() {
         </main>
       )}
     </div>
+    </CommandsProvider>
   );
 }

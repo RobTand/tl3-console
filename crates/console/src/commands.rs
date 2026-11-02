@@ -1,20 +1,155 @@
-//! `POST /api/requests/{id}/commands` (PRD #327, C3).
+//! `POST /api/requests/{id}/commands` (PRD #327, C3). The console files the
+//! command for tl3d and answers 202 with its id; the outcome arrives on the
+//! stream. Writes need the console's own header, which a cross-site form
+//! can't send, and a same-origin browser.
 
-use axum::http::HeaderMap;
+use crate::api::{CommandRequest, Filed};
+use axum::{
+    Json, Router,
+    extract::{Path, State, rejection::JsonRejection},
+    http::{HeaderMap, StatusCode, header},
+    response::{IntoResponse, Response},
+    routing::post,
+};
+use std::sync::{Arc, Mutex};
+use tl3_store::ConsoleCommands;
 
 /// Browsers never send this header cross-site without a CORS preflight,
 /// which the console never grants.
 pub const HEADER: &str = "x-tl3-console";
 
-/// The write came from this console's own page.
-#[allow(dead_code)]
-fn same_origin(_headers: &HeaderMap) -> bool {
-    todo!()
+#[derive(Clone)]
+struct Filer {
+    settings: tl3_config::Store,
+    session: Arc<Mutex<Option<ConsoleCommands>>>,
 }
 
-#[allow(dead_code)]
-fn is_uuid(_id: &str) -> bool {
-    todo!()
+impl Filer {
+    /// File on the open session; a broken session is replaced once.
+    fn submit(&self, id: &str, node: u64, action: &serde_json::Value) -> tl3_store::Result<bool> {
+        let mut session = self.session.lock().expect("command session");
+        let mut retried = false;
+        loop {
+            if session.is_none() {
+                *session = Some(ConsoleCommands::open(&self.settings)?);
+            }
+            match session
+                .as_mut()
+                .expect("an open session")
+                .submit(id, node, action)
+            {
+                Err(error) if !retried && is_connection(&error) => {
+                    retried = true;
+                    *session = None;
+                }
+                result => return result,
+            }
+        }
+    }
+}
+
+fn is_connection(error: &tl3_store::Error) -> bool {
+    matches!(error, tl3_store::Error::Database(error) if error.is_closed() || error.as_db_error().is_none())
+}
+
+pub(crate) fn router(settings: tl3_config::Store) -> Router {
+    Router::new()
+        .route("/api/requests/{id}/commands", post(file))
+        .with_state(Filer {
+            settings,
+            session: Arc::default(),
+        })
+}
+
+fn refused(status: StatusCode, reason: &'static str) -> Response {
+    (status, format!("{reason}\n")).into_response()
+}
+
+/// The write came from this console's own page.
+fn same_origin(headers: &HeaderMap) -> bool {
+    if headers.get(HEADER).is_none_or(|value| value != "1") {
+        return false;
+    }
+    if headers
+        .get("sec-fetch-site")
+        .is_some_and(|site| site != "same-origin")
+    {
+        return false;
+    }
+    match headers.get(header::ORIGIN) {
+        None => true,
+        Some(origin) => {
+            let Some(host) = headers
+                .get(header::HOST)
+                .and_then(|host| host.to_str().ok())
+            else {
+                return false;
+            };
+            origin
+                .to_str()
+                .ok()
+                .and_then(|origin| origin.split_once("://"))
+                .is_some_and(|(scheme, rest)| matches!(scheme, "http" | "https") && rest == host)
+        }
+    }
+}
+
+fn is_uuid(id: &str) -> bool {
+    let groups: Vec<_> = id.split('-').collect();
+    groups.len() == 5
+        && groups
+            .iter()
+            .zip([8, 4, 4, 4, 12])
+            .all(|(group, len)| group.len() == len)
+        && id
+            .chars()
+            .all(|c| c == '-' || c.is_ascii_digit() || ('a'..='f').contains(&c))
+}
+
+async fn file(
+    State(filer): State<Filer>,
+    Path(node): Path<u64>,
+    headers: HeaderMap,
+    body: std::result::Result<Json<CommandRequest>, JsonRejection>,
+) -> Response {
+    if !same_origin(&headers) {
+        return refused(
+            StatusCode::FORBIDDEN,
+            "Commands come only from the console's own page.",
+        );
+    }
+    let Ok(Json(request)) = body else {
+        return refused(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The console couldn't read this command.",
+        );
+    };
+    if !is_uuid(&request.id) {
+        return refused(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Command ids are lowercase UUIDs.",
+        );
+    }
+    let action = serde_json::to_value(&request.action).expect("actions serialize");
+    let id = request.id.clone();
+    let filed = tokio::task::spawn_blocking(move || filer.submit(&request.id, node, &action)).await;
+    match filed {
+        Ok(Ok(filed)) => (StatusCode::ACCEPTED, Json(Filed { id, filed })).into_response(),
+        Ok(Err(error)) => {
+            eprintln!(
+                "console command {id} not filed: {}",
+                crate::describe(&error)
+            );
+            refused(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "The console couldn't reach the store; try again.",
+            )
+        }
+        Err(_) => refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "The console couldn't file this command; try again.",
+        ),
+    }
 }
 
 #[cfg(test)]

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Badge, Card, Ending } from "../api/types.gen";
 import { elapsed } from "../time";
 
@@ -37,7 +38,7 @@ function Chip(props: { tone: string; title: string; children: string }) {
   );
 }
 
-export function BoardCard({ card, now }: { card: Card; now: number }) {
+export function BoardCard({ card, now, children }: { card: Card; now: number; children?: ReactNode }) {
   const [owner, name] = card.repo.split("/");
   const retries =
     card.retries.plan + card.retries.audit + card.retries.run_failures + card.retries.effect_failures;
@@ -100,6 +101,7 @@ export function BoardCard({ card, now }: { card: Card; now: number }) {
           ))}
         </ul>
       )}
+      {children}
     </article>
   );
 }

@@ -22,7 +22,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use supervise::Supervisor;
-use tl3_controller::board::{Board, Rows};
+use tl3_controller::{
+    board::{Board, Rows},
+    console::CommandRecord,
+};
 use tl3_store::Reader;
 use tokio::sync::watch;
 
@@ -72,6 +75,8 @@ pub(crate) struct Published {
     /// Counts board builds, to tell stream events apart.
     pub build: u64,
     pub board: Option<Arc<Board>>,
+    /// The newest console commands and how each settled.
+    pub commands: Option<Arc<Vec<CommandRecord>>>,
     /// The change feed is open and the last build read the store.
     pub connected: bool,
 }
@@ -90,6 +95,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         assets,
         models,
     } = options;
+    let store_for_commands = store.clone();
     {
         let (store, rebuilds, connected) = (store.clone(), rebuilds.clone(), connected.clone());
         supervisor.spawn("feed", move || feed::run(store, rebuilds, connected))?;
@@ -112,7 +118,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
             publish.send_if_modified(|current| {
                 let mut changed = current.connected != live;
                 current.connected = live;
-                if let Ok(board) = &built
+                if let Ok((board, _)) = &built
                     && current
                         .board
                         .as_deref()
@@ -120,6 +126,12 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
                 {
                     current.build += 1;
                     current.board = Some(Arc::new(board.clone()));
+                    changed = true;
+                }
+                if let Ok((_, commands)) = &built
+                    && current.commands.as_deref() != Some(commands)
+                {
+                    current.commands = Some(Arc::new(commands.clone()));
                     changed = true;
                 }
                 changed
@@ -137,7 +149,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
         .thread_name("tl3-console-http")
         .enable_all()
         .build()?;
-    let app = server::router(published, &assets);
+    let app = server::router(published, &assets, commands::router(store_for_commands));
     supervisor.spawn("http", move || {
         let served = runtime.block_on(async move {
             let listener = tokio::net::TcpListener::from_std(listener)?;
@@ -153,6 +165,9 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
     })
 }
 
+/// Enough for every action a browser is waiting on, and a bulk defer.
+const COMMANDS_SHOWN: i64 = 200;
+
 /// Keeps the last read rows so a progress tick rereads progress alone.
 struct Builder {
     store: tl3_config::Store,
@@ -162,8 +177,9 @@ struct Builder {
 }
 
 impl Builder {
-    /// Read the board in one snapshot. A broken session is replaced once.
-    fn build(&mut self, change: Change) -> tl3_controller::Result<Board> {
+    /// Read the board and the newest console commands in one snapshot. A
+    /// broken session is replaced once.
+    fn build(&mut self, change: Change) -> tl3_controller::Result<(Board, Vec<CommandRecord>)> {
         let mut retried = false;
         loop {
             match self.read(change) {
@@ -176,7 +192,7 @@ impl Builder {
         }
     }
 
-    fn read(&mut self, change: Change) -> tl3_controller::Result<Board> {
+    fn read(&mut self, change: Change) -> tl3_controller::Result<(Board, Vec<CommandRecord>)> {
         if self.reader.is_none() {
             self.reader = Some(Reader::open(&self.store)?);
         }
@@ -189,10 +205,11 @@ impl Builder {
             }
             _ => Rows::read(&mut tx)?,
         };
+        let commands = tl3_controller::console::recent(&mut tx, COMMANDS_SHOWN)?;
         tx.commit().map_err(tl3_store::Error::from)?;
         let board = rows.project(now_ms(), self.models.as_ref());
         self.rows = Some(rows);
-        Ok(board)
+        Ok((board, commands))
     }
 }
 
