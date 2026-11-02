@@ -685,6 +685,7 @@ fn reply_cause(reply: Reply) -> &'static str {
         Reply::PlanLeaf { .. } => "The planner returned a plan",
         Reply::PlanSplit => "The planner proposed a split",
         Reply::PlanCantMeet => "The planner couldn't meet the request",
+        Reply::ProtectedPaths => todo!(),
         Reply::MakerDone { .. } => "The maker made a change",
         Reply::MakerNeedsFiles { .. } => "The maker asked for more files",
         Reply::MakerCantMeet => "The maker couldn't meet the request",
@@ -901,6 +902,7 @@ fn reply_outcome_of(reply: Reply) -> &'static str {
         Reply::PlanLeaf { .. } => "Returned a plan",
         Reply::PlanSplit => "Proposed a split",
         Reply::PlanCantMeet | Reply::MakerCantMeet => "Can't meet the request",
+        Reply::ProtectedPaths => todo!(),
         Reply::MakerDone { .. } => "Made a change",
         Reply::MakerNeedsFiles { .. } => "Asked for more files",
         Reply::MakerOutOfRoom | Reply::ReviewerOutOfRoom => "Ran out of room",
@@ -1291,6 +1293,28 @@ mod tests {
     use serde_json::json;
     use tl3_controller::board::Request;
     use tl3_kernel::{Cont, Node, NodeId, QKind, Question, RepoId};
+
+    #[test]
+    fn protected_paths_timeline_explains_why_the_request_ended() {
+        assert_eq!(
+            super::cause(
+                "reply:0",
+                &json!({"kernel_event": {"Reply": {
+                    "node": 0, "generation": 1, "reply": "ProtectedPaths"
+                }}}),
+                &[],
+            ),
+            "The request touches protected paths"
+        );
+    }
+
+    #[test]
+    fn protected_paths_run_explains_why_it_ended() {
+        assert_eq!(
+            super::reply_outcome_of(tl3_kernel::Reply::ProtectedPaths),
+            "Touches protected paths"
+        );
+    }
 
     #[test]
     fn plain_text_keeps_line_breaks_and_drops_hidden_characters() {
