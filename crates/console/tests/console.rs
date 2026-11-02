@@ -64,7 +64,7 @@ fn main() {
     store_refusals_say_why(&settings, &filer, node);
     println!("test store_refusals_say_why ... ok");
     drop(filer);
-    prompts_edit_and_revert_through_the_api(&mut database, assets.path());
+    let prompt_database = prompts_edit_and_revert_through_the_api(assets.path());
     println!("test prompts_edit_and_revert_through_the_api ... ok");
     drop(controller);
     builds_once_the_store_is_migrated(&mut database, assets.path());
@@ -83,6 +83,7 @@ fn main() {
     println!("test streams_again_after_postgres_restarts ... ok");
     database.stop();
     hidden_database.stop();
+    prompt_database.stop();
     println!("19 console scenarios passed; no skips");
 }
 
@@ -1473,7 +1474,10 @@ fn json_body(response: (u16, Vec<u8>), status: u16) -> Value {
 
 /// Rob saves a prompt version, sees it active, and reverts it, through a
 /// console whose login may write prompt versions and nothing else.
-fn prompts_edit_and_revert_through_the_api(database: &mut Database, assets: &Path) {
+fn prompts_edit_and_revert_through_the_api(assets: &Path) -> Database {
+    // Test consoles keep their sessions for the process lifetime. Isolate the
+    // prompt sessions from the shared cluster's 20-connection limit.
+    let mut database = Database::start();
     let settings = database.create("console_prompts");
     let mut store = Store::open(&settings).unwrap();
     tl3_controller::prompts::seed(&mut store).unwrap();
@@ -1717,4 +1721,5 @@ fn prompts_edit_and_revert_through_the_api(database: &mut Database, assets: &Pat
     raw(&settings)
         .execute("DELETE FROM tl3_schema_migrations WHERE version = 999", &[])
         .unwrap();
+    database
 }
