@@ -32,6 +32,7 @@ test("a stopped request waits in the backlog, and cancelled work is not done", a
     const card = (region: string, issue: number) =>
       page.getByRole("region", { name: region }).getByRole("article", { name: new RegExp(`tl3-sandbox#${issue}:`) });
     // The merge-queue request was stopped; its issue stays open, so Rob can restart it.
+    await expect(page.getByRole("region", { name: "Backlog" })).toContainText("batching rules");
     const stopped = page.getByRole("region", { name: "Backlog" }).getByRole("article", { name: /tl3-sandbox#104:/ });
     await expect(stopped.getByRole("list", { name: "Badges" })).toHaveText("Stopped");
     await stopped.getByRole("button", { name: "Actions" }).click();
