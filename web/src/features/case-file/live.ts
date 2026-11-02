@@ -70,8 +70,7 @@ export function useOpenRequest(): { id: number | null; open: (id: number) => voi
     if (next === null) {
       url.searchParams.delete("request");
       url.searchParams.delete("tab");
-    }
-    else url.searchParams.set("request", String(next));
+    } else url.searchParams.set("request", String(next));
     window.history.pushState(null, "", url);
     setId(next);
   }, []);

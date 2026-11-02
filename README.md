@@ -209,11 +209,6 @@ read-only sessions. Hidden repositories are excluded from reads and counts.
 The `postmortems` stream event invalidates open queries whenever postmortems,
 recommendations or grades change, and on reconnect. There is no refresh timer.
 
-The verification script `tools/verify/postmortems.sh rust|web` runs inside
-PrismaBuild from a clean checkout. The web run downloads checksum-verified Node
-22.23.4, installs Chromium in Playwright's user cache and drives the embedded
-Postgres fixture. Set `TL3_SCREENSHOTS` to record evidence in both themes.
-
 ## Host names
 
 A web page on another site can point its own host name at the console's
