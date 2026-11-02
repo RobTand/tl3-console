@@ -1,0 +1,86 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["Cargo.toml"])
+
+_POSTGRES_FILES = select({
+    "@platforms//cpu:aarch64": ["@postgres_linux_arm64//:bin/postgres", "@postgres_linux_arm64//:all"],
+    "//conditions:default": ["@postgres_linux_amd64//:bin/postgres", "@postgres_linux_amd64//:all"],
+})
+
+_POSTGRES_ENV = select({
+    "@platforms//cpu:aarch64": {"TL3_TEST_POSTGRES_BIN": "$(rootpath @postgres_linux_arm64//:bin/postgres)"},
+    "//conditions:default": {"TL3_TEST_POSTGRES_BIN": "$(rootpath @postgres_linux_amd64//:bin/postgres)"},
+})
+
+_DEPS = all_crate_deps(normal = True)
+
+_TEST_DEPS = all_crate_deps(normal = True, normal_dev = True) + [":tl3_console"]
+
+_SUPPORT = glob(["tests/support/*.rs"])
+
+rust_library(
+    name = "tl3_console",
+    srcs = glob(["src/**/*.rs"], exclude = ["src/bin/**"]),
+    aliases = aliases(),
+    crate_root = "src/lib.rs",
+    edition = "2024",
+    deps = _DEPS,
+)
+
+rust_binary(
+    name = "tl3-console",
+    srcs = ["src/bin/tl3-console.rs"],
+    aliases = aliases(),
+    edition = "2024",
+    deps = _DEPS + [":tl3_console"],
+)
+
+# The web app's e2e test starts this fixture.
+rust_binary(
+    name = "console_fixture",
+    srcs = ["examples/console_fixture.rs"] + _SUPPORT,
+    aliases = aliases(normal = True, normal_dev = True),
+    compile_data = ["tests/fixtures/tl3-example.toml"],
+    crate_root = "examples/console_fixture.rs",
+    edition = "2024",
+    deps = _TEST_DEPS,
+)
+
+rust_binary(
+    name = "board_scale",
+    srcs = ["examples/board_scale.rs"] + _SUPPORT,
+    aliases = aliases(normal = True, normal_dev = True),
+    crate_root = "examples/board_scale.rs",
+    edition = "2024",
+    deps = _TEST_DEPS,
+)
+
+rust_test(
+    name = "lib_test",
+    size = "small",
+    crate = ":tl3_console",
+    data = ["//web:api_types"],
+    env = {"TL3_API_TYPES": "$(rootpath //web:api_types)"},
+    tags = ["rust"],
+    deps = all_crate_deps(normal_dev = True),
+)
+
+rust_test(
+    name = "console_test",
+    size = "large",
+    srcs = ["tests/console.rs"] + _SUPPORT,
+    aliases = aliases(normal = True, normal_dev = True),
+    compile_data = ["tests/fixtures/tl3-example.toml"],
+    crate_root = "tests/console.rs",
+    data = _POSTGRES_FILES,
+    edition = "2024",
+    env = _POSTGRES_ENV,
+    # Embedded Postgres, the console's threads and the test's clients side by side.
+    exec_properties = {"EstimatedCPU": "4", "EstimatedMemory": "8GB"},
+    tags = ["rust"],
+    use_libtest_harness = False,
+    deps = _TEST_DEPS,
+)
