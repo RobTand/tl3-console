@@ -1,0 +1,87 @@
+# Mergify merge queue for tl3-console, modelled on TL3's and PrismaBuild's.
+#
+# The Gate workflow runs on every pull request push and on each batch draft
+# that Mergify opens on a mergify/merge-queue/ branch. It uploads the Bazel
+# packages a change impacts as the pull request's scopes and reports two
+# checks, Rust and Web. A batch merges only when both pass on its draft.
+#
+# Add the "queue" label to queue a pull request once Rust and Web pass on its
+# head; remove it to dequeue. When a batch's draft passes, Mergify merges the
+# batch's original pull requests, which keeps branch protection's "require a
+# pull request" rule without a bypass actor. Classic branch protection holds
+# no test checks: Mergify would inject them into merge_conditions, where a
+# batch draft is judged on them too (PrismaQuant and Tessera stalled that way).
+#
+# TL3's pull requests enter the default queue another way: TL3 tests each
+# change through PrismaBuild and reviews it, posts its "TL3 approval" check on
+# the reviewed head, then adds "tl3-queue". The batch's Rust and Web still
+# decide every merge. TL3 finds its rule's check by name, so keep
+# "Queue TL3-approved PRs". TL3's GitHub App requeues its own pull requests
+# with "@mergifyio queue" or "requeue", so the app is allowed by name.
+scopes:
+  source:
+    manual:
+
+commands_restrictions:
+  queue:
+    conditions:
+      - or:
+          - sender-permission>=write
+          - sender=tl3-robtand[bot]
+  requeue:
+    conditions:
+      - or:
+          - sender-permission>=write
+          - sender=tl3-robtand[bot]
+
+merge_queue:
+  mode: serial
+  max_parallel_checks: 2
+  reset_on_external_merge: always
+  status_comments: outcomes
+  queue_controls_comment: false
+  queued_label: queued
+  dequeued_label: dequeued
+
+queue_rules:
+  - name: default
+    queue_conditions:
+      - base = main
+      - -draft
+      - or:
+          - and:
+              - label = queue
+              - check-success = Rust
+              - check-success = Web
+          - and:
+              - label = tl3-queue
+              - check-success = @tl3-robtand/TL3 approval
+    merge_conditions:
+      - check-success = Rust
+      - check-success = Web
+    merge_method: merge
+    batch_size:
+      min: 1
+      max: 7
+    batch_max_wait_time: 2 minutes
+    max_checks_retries: 0
+    checks_timeout: 60 minutes
+
+pull_request_rules:
+  - name: queue pull requests labelled "queue"
+    conditions:
+      - base = main
+      - label = queue
+      - -draft
+    actions:
+      queue:
+        name: default
+  - name: Queue TL3-approved PRs
+    conditions:
+      - base = main
+      - label = tl3-queue
+      - -draft
+      - check-success = @tl3-robtand/TL3 approval
+    actions:
+      queue:
+        name: default

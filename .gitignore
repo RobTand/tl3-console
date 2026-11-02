@@ -1,1 +1,7 @@
 target/
+bazel-*
+/*bazel-remote-grpc.log
+/*execution_log.binpb.zst
+gate-output/
+gate-artifacts/
+__pycache__/

@@ -1,0 +1,97 @@
+module(name = "tl3_console")
+
+bazel_dep(name = "rules_rust", version = "0.75.0")
+bazel_dep(name = "rules_python", version = "2.4.6")
+bazel_dep(name = "rules_shell", version = "0.6.1")
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "toolchains_buildbuddy", version = "0.0.4")
+
+# gcc 13 from the remote image, as in TL3. The image is the multi-arch index
+# whose manifests tools/bazel:linux_* pin.
+buildbuddy = use_extension("@toolchains_buildbuddy//:extensions.bzl", "buildbuddy")
+buildbuddy.platform(container_image = "docker://gcr.io/flame-public/rbe-ubuntu24-04@sha256:be9853fc45092d2cf2bda3abed30d22182881659a50bf35c7125161d7cfc8a75")
+use_repo(buildbuddy, "buildbuddy_toolchain")
+
+register_toolchains(
+    "@buildbuddy_toolchain//:ubuntu_cc_toolchain",
+    "@buildbuddy_toolchain//:ubuntu_cc_toolchain_arm64",
+)
+
+# The same Rust as rust-toolchain.toml and TL3.
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(edition = "2024", versions = ["1.99.1"])
+use_repo(rust, "rust_toolchains")
+register_toolchains("@rust_toolchains//:all")
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.defaults(python_version = "3.14")
+python.toolchain(python_version = "3.14")
+use_repo(python, "python_3_14", "pythons_hub")
+register_toolchains("@pythons_hub//:all")
+
+# TL3's crates come from Cargo.lock's git source, pinned once in Cargo.toml's
+# [workspace.dependencies]. @tl3 is the same commit's full tree, read from
+# Cargo.lock, for the one build script that reads outside its crate.
+tl3_source = use_repo_rule("//tools/bazel:tl3_source.bzl", "tl3_source")
+tl3_source(
+    name = "tl3",
+    cargo_lock = "//:Cargo.lock",
+    cargo_toml = "//:Cargo.toml",
+)
+
+cargo_feature_lock = use_repo_rule("//tools/bazel:cargo_lock.bzl", "cargo_feature_lock")
+cargo_feature_lock(name = "bazel_cargo_lock", source = "//:Cargo.lock")
+
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "crates",
+    cargo_lockfile = "@bazel_cargo_lock//:Cargo.lock",
+    skip_cargo_lockfile_overwrite = False,
+    supported_platform_triples = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"],
+    manifests = ["//:Cargo.toml"],
+)
+# As in TL3: crate_universe unifies sqlx-core's host and target features. Its
+# Executor trait enables describe with offline, so its Postgres implementation must agree.
+crate.spec(package = "sqlx-postgres", version = "=0.9.0", default_features = False, features = ["offline"])
+# tl3-controller's build.rs reads TL3's workers/ schemas, outside the crate
+# directory that crate_universe fetches. Run it from TL3's full tree instead.
+# The spoke repository can't see @tl3 by name, so these use its canonical name,
+# which use_repo_rule derives from the rule and repository names above.
+crate.annotation(
+    crate = "tl3-controller",
+    override_target_build_script = "@@+tl3_source+tl3//crates/controller:build_script",
+    compile_data = ["@@+tl3_source+tl3//crates/controller:schemas"],
+)
+use_repo(crate, "crates")
+
+postgres_archive = use_repo_rule("//tools/bazel:postgres.bzl", "postgres_archive")
+postgres_archive(
+    name = "postgres_linux_amd64",
+    url = "https://repo.maven.apache.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/17.4.0/embedded-postgres-binaries-linux-amd64-17.4.0.jar",
+    sha256 = "d9d216d3c1c119ad31b8a8de60b3cf2826516f711a04d3745ef4f1913f21a938",
+)
+postgres_archive(
+    name = "postgres_linux_arm64",
+    url = "https://repo.maven.apache.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-arm64v8/17.4.0/embedded-postgres-binaries-linux-arm64v8-17.4.0.jar",
+    sha256 = "28d7265e7f049ffc9f80867f2f99ebfe92eadec3dd3c8e819f3136c3b2e86a05",
+)
+
+# Node for the web app's npm scripts. package.json asks for >=22.
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+NODE_BUILD = """exports_files(["bin/node"])
+filegroup(name = "all", srcs = glob(["bin/**", "lib/**"]), visibility = ["//visibility:public"])
+"""
+http_archive(
+    name = "nodejs_linux_amd64",
+    build_file_content = NODE_BUILD,
+    sha256 = "1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce",
+    strip_prefix = "node-v22.23.4-linux-x64",
+    urls = ["https://nodejs.org/dist/v22.23.4/node-v22.23.4-linux-x64.tar.xz"],
+)
+http_archive(
+    name = "nodejs_linux_arm64",
+    build_file_content = NODE_BUILD,
+    sha256 = "6287aa46b6c375d816e63ae66d024fbbfd70404825aabdfdf898a970871d2f4b",
+    strip_prefix = "node-v22.23.4-linux-arm64",
+    urls = ["https://nodejs.org/dist/v22.23.4/node-v22.23.4-linux-arm64.tar.xz"],
+)
