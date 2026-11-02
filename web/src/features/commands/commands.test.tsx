@@ -49,6 +49,8 @@ const EFFECT_FAILED: CardQuestion = {
   recommended: 0,
   reason: "This option gives your request a clear next step.",
   defer_blocked: null,
+  decision: null,
+  findings: null,
 };
 
 const OUT_OF_CREDIT: CardQuestion = {
@@ -62,6 +64,8 @@ const OUT_OF_CREDIT: CardQuestion = {
   recommended: 0,
   reason: "This option gives your request a clear next step.",
   defer_blocked: "TL3's recommended option, \"Add credit\", needs a credit amount from you.",
+  decision: null,
+  findings: null,
 };
 
 describe("commandId", () => {
