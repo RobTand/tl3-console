@@ -68,13 +68,25 @@ function Findings({ value }: { value: unknown }) {
     </dl>
   );
 }
+function hasContent(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return typeof value === "string" ? value.trim().length > 0 : true;
+}
+const EMPTY_FINDINGS: Record<PostmortemStatus, string> = {
+  owed: "Judge's findings arrive when the postmortem runs",
+  running: "The judge is writing this postmortem.",
+  done: "No findings were recorded for this postmortem.",
+  failed: "The postmortem failed before findings were recorded.",
+};
 function hasFindings(item: Postmortem) {
   return Boolean(
     item.summary ||
       item.cause ||
       item.notes ||
-      (item.timeline && JSON.stringify(item.timeline) !== "[]") ||
-      (item.process_failures && JSON.stringify(item.process_failures) !== "[]") ||
+      hasContent(item.timeline) ||
+      hasContent(item.process_failures) ||
       item.recommendations.length,
   );
 }
@@ -116,7 +128,7 @@ function Report({ item }: { item: Postmortem }) {
       )}
       {!hasFindings(item) ? (
         <p className="mt-3 rounded bg-surface-2 px-3 py-2 text-xs text-muted">
-          Judge's findings arrive when the postmortem runs
+          {EMPTY_FINDINGS[item.status]}
         </p>
       ) : (
         <div className="mt-3 space-y-3 text-xs text-text">
@@ -132,7 +144,7 @@ function Report({ item }: { item: Postmortem }) {
               {item.cause === "tl3" ? "TL3" : "Outside TL3"}
             </p>
           )}
-          {item.timeline !== null && (
+          {hasContent(item.timeline) && (
             <section aria-label="Postmortem timeline">
               <h4 className="mb-1 text-2xs font-semibold text-muted">Timeline</h4>
               <Findings value={item.timeline} />

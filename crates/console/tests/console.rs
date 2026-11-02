@@ -1951,9 +1951,7 @@ fn postmortem_scenarios() {
         (
             "postmortems_ignore_unrelated_world_commits",
             Box::new(|| {
-                let mut stream = EventStream::open(address, None);
-                stream.board_event();
-                while stream.event().name != "postmortems" {}
+                let mut stream = postmortem_stream(address);
                 controller.intake(issue(338)).unwrap();
                 stream.board_event();
                 let command = serde_json::json!({
@@ -1970,10 +1968,7 @@ fn postmortem_scenarios() {
             "postmortems_three_tables_refresh_stream_without_world_change",
             Box::new(|| {
                 assert_eq!(get(address, "/api/requests/0/postmortems").0, 200);
-                let mut stream = EventStream::open(address, None);
-                stream.board_event();
-                // Each connection sends an invalidation, so reconnects refresh an open page.
-                while stream.event().name != "postmortems" {}
+                let mut stream = postmortem_stream(address);
                 for sql in [
                     "UPDATE tl3_postmortems SET notes = 'Changed' WHERE node_id = '0'",
                     "BEGIN; UPDATE tl3_postmortems SET notes = 'Coalesced' WHERE node_id = '0'; NOTIFY tl3_changes, 'tl3_world'; COMMIT",
@@ -1998,4 +1993,18 @@ fn postmortem_scenarios() {
     }
     database.stop();
     assert_eq!(failed, 0, "postmortem scenarios failed");
+}
+
+
+fn postmortem_stream(address: SocketAddr) -> EventStream {
+    let mut stream = EventStream::open(address, None);
+    stream.board_event();
+    let mut live = stream.last_database.as_ref().is_some_and(|event| event["connected"] == true);
+    loop {
+        let event = stream.event();
+        if event.name == "database" { live = event.data["connected"] == true; }
+        // Drain the initial invalidation after LISTEN is connected. A reconnect
+        // before this point is allowed to invalidate postmortems too.
+        if live && event.name == "postmortems" { return stream; }
+    }
 }

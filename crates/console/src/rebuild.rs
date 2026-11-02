@@ -18,6 +18,8 @@ pub(crate) enum Change {
     Commands,
     Postmortems,
     World,
+    /// A world rebuild that must also invalidate postmortem views.
+    WorldPostmortems,
 }
 
 #[derive(Default)]
@@ -29,7 +31,12 @@ struct State {
 impl Rebuilds {
     pub(crate) fn request(&self, change: Change) {
         let mut state = self.state.lock().expect("rebuild state");
-        state.stale = state.stale.max(Some(change));
+        state.stale = Some(match (state.stale, change) {
+            (Some(Change::World), Change::Postmortems)
+            | (Some(Change::Postmortems), Change::World) => Change::WorldPostmortems,
+            (Some(previous), change) => previous.max(change),
+            (None, change) => change,
+        });
         self.wake.notify_one();
     }
 

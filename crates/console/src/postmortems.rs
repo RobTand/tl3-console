@@ -188,7 +188,6 @@ pub(crate) fn routes(store: tl3_config::Store, hidden: HiddenRepos) -> Router {
     Router::new()
         .route("/api/postmortems", get(list))
         .route("/api/requests/{id}/postmortems", get(request))
-        .route("/api/postmortems/{id}", get(request))
         .with_state(Views {
             store,
             hidden,

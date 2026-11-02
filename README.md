@@ -199,8 +199,7 @@ Read-only API routes:
 
 - `GET /api/postmortems`: filters `q`, `repo`, `cause`, `reason`, `status`,
   `from`, `to`, `limit` and `before`.
-- `GET /api/requests/{id}/postmortems`, also `GET /api/postmortems/{id}`:
-  postmortems and code grades for a request. `before` and `grade_before` page
+- `GET /api/requests/{id}/postmortems`: postmortems and code grades for a request. `before` and `grade_before` page
   each history independently.
 
 Pages default to 50 postmortems, accept at most 100 and return `next_before`.

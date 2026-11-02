@@ -164,7 +164,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
             }
             publish.send_if_modified(|current| {
                 let mut changed = current.connected != live;
-                if built.is_ok() && matches!(change, Change::World | Change::Postmortems) {
+                if built.is_ok() && matches!(change, Change::Postmortems | Change::WorldPostmortems) {
                     current.postmortems += 1;
                     changed = true;
                 }
@@ -191,7 +191,7 @@ pub fn start(listener: std::net::TcpListener, options: Options) -> Result<Runnin
             // failed build (a schema tl3d hasn't migrated yet) retries itself.
             if built.is_err() && connected.load(Ordering::SeqCst) {
                 std::thread::sleep(retry.delay());
-                rebuilds.request(Change::World);
+                rebuilds.request(change);
             }
         }
     })?;

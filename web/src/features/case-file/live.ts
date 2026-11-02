@@ -67,7 +67,10 @@ export function useOpenRequest(): { id: number | null; open: (id: number) => voi
   }, []);
   const go = useCallback((next: number | null) => {
     const url = new URL(window.location.href);
-    if (next === null) { url.searchParams.delete("request"); url.searchParams.delete("tab"); }
+    if (next === null) {
+      url.searchParams.delete("request");
+      url.searchParams.delete("tab");
+    }
     else url.searchParams.set("request", String(next));
     window.history.pushState(null, "", url);
     setId(next);
