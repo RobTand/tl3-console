@@ -51,10 +51,12 @@ fn main() {
     drop(controller);
     builds_once_the_store_is_migrated(&mut database, assets.path());
     println!("test builds_once_the_store_is_migrated ... ok");
+    refuses_a_schema_it_does_not_match(&mut database, assets.path());
+    println!("test refuses_a_schema_it_does_not_match ... ok");
     streams_again_after_postgres_restarts(address, &mut database, &settings, records.path());
     println!("test streams_again_after_postgres_restarts ... ok");
     database.stop();
-    println!("8 console scenarios passed; no skips");
+    println!("9 console scenarios passed; no skips");
 }
 
 fn bootstrap() -> Bootstrap {
@@ -499,6 +501,38 @@ fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
     assert_eq!(event.name, "snapshot");
     assert_eq!(event.data["revision"], 0);
     assert_eq!(event.data["cards"], serde_json::json!([]));
+}
+
+/// A TL3 deploy that migrates past the pinned commit: the deploy's check and
+/// the board both refuse the store until the pin moves.
+fn refuses_a_schema_it_does_not_match(database: &mut Database, assets: &Path) {
+    let settings = database.create("console_newer_schema");
+    drop(Store::open(&settings).unwrap());
+    tl3_console::check(&settings).unwrap();
+    raw(&settings)
+        .execute(
+            "INSERT INTO tl3_schema_migrations VALUES (999, 'SELECT 1')",
+            &[],
+        )
+        .unwrap();
+    let error = tl3_console::check(&settings).unwrap_err().to_string();
+    assert!(error.contains("schema version 999"), "{error}");
+    let console = tl3_console::start(
+        TcpListener::bind("127.0.0.1:0").unwrap(),
+        tl3_console::Options {
+            store: settings.clone(),
+            assets: assets.into(),
+            models: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(get(console.address(), "/api/board").0, 503);
+    let mut stream = EventStream::open_with_guard(console.address(), None, Duration::from_secs(20));
+    raw(&settings)
+        .execute("DELETE FROM tl3_schema_migrations WHERE version = 999", &[])
+        .unwrap();
+    assert_eq!(stream.board_event().name, "snapshot");
+    tl3_console::check(&settings).unwrap();
 }
 
 /// Q53: when the maker's model reports quota, the card names the fallback the
