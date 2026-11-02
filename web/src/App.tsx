@@ -17,7 +17,9 @@ const PromptsPage = lazy(() =>
   import("./features/prompts/PromptsPage").then((module) => ({ default: module.PromptsPage })),
 );
 
-const PostmortemsPage = lazy(() => import("./features/postmortems/PostmortemsPage").then((module) => ({ default: module.PostmortemsPage })));
+const PostmortemsPage = lazy(() =>
+  import("./features/postmortems/PostmortemsPage").then((module) => ({ default: module.PostmortemsPage })),
+);
 
 const ALL_REPOS = "*";
 
@@ -141,7 +143,11 @@ export function App() {
           <ThemeSwitch />
         </div>
       </header>
-      {route.page === "postmortems" ? <Suspense fallback={<main className="p-4 text-sm text-muted">Loading postmortems…</main>}><PostmortemsPage /></Suspense> : route.page === "prompts" ? (
+      {route.page === "postmortems" ? (
+        <Suspense fallback={<main className="p-4 text-sm text-muted">Loading postmortems…</main>}>
+          <PostmortemsPage />
+        </Suspense>
+      ) : route.page === "prompts" ? (
         <Suspense
           fallback={
             <main className="flex flex-1 items-center justify-center text-sm text-muted">Loading prompts…</main>

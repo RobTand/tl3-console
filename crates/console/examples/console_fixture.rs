@@ -344,10 +344,13 @@ fn seed_postmortems(settings: &tl3_config::Store) {
             'Keep the device constraint in the admission check.', clock_timestamp() - interval '14 minutes', clock_timestamp() - interval '12 minutes' FROM tl3_events;
         INSERT INTO tl3_postmortems(node_id, trigger, reason, repo, issue, title, revision, owed_at, status, failed_at, failure)
         SELECT '1', 'rob:fixture', 'rob_asked', 'RobTand/prismabuild', 101, 'Retry Hindsight writes after a 429', max(revision), clock_timestamp() - interval '10 minutes', 'failed', clock_timestamp() - interval '9 minutes', 'The judge model call was interrupted.' FROM tl3_events;
+        INSERT INTO tl3_postmortems(node_id, trigger, reason, repo, issue, title, revision, owed_at, status, cause, summary, started_at, finished_at)
+        SELECT node_id, 'rob:fixture-previous', reason, repo, issue, title, revision, owed_at - interval '1 minute', status, cause, summary, started_at, finished_at
+        FROM tl3_postmortems WHERE node_id = '0' AND trigger = 'rob:fixture';
         INSERT INTO tl3_postmortem_recommendations(postmortem_id, fingerprint, rank, phase, kind, target, operation, before, after, evidence, effect)
         SELECT id, 'rec-0123456789abcdef', 1, 'making', 'prompt', 'Check admission constraints before submitting work', 'add', '',
             'Read the worker capacity and device requirements before submitting a batch.', 'Batch 17 combined two device classes; review caught the mismatch.', 'Catch incompatible work before it reaches the queue.'
-        FROM tl3_postmortems WHERE trigger = 'rob:fixture' OR id = (SELECT min(id) FROM tl3_postmortems WHERE node_id = '2');
+        FROM tl3_postmortems WHERE trigger IN ('rob:fixture', 'rob:fixture-previous');
     "#).unwrap();
 }
 

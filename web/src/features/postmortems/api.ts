@@ -96,10 +96,11 @@ export function usePostmortems(id: number | null) {
       if (pageParam.gradeBefore !== null) params.set("grade_before", String(pageParam.gradeBefore));
       return read(`/api/requests/${id}/postmortems?${params}`, signal, request);
     },
+    // IDs start at 1. Keep exhausted collections empty while the other pages.
     getNextPageParam: (last): Cursor | undefined =>
       last.next_before === null && last.next_grade_before === null
         ? undefined
-        : { before: last.next_before, gradeBefore: last.next_grade_before },
+        : { before: last.next_before ?? 1, gradeBefore: last.next_grade_before ?? 1 },
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     retry: false,
