@@ -283,8 +283,8 @@ fn read_page(
           AND ($5::text IS NULL OR cause = $5)
           AND ($6::text IS NULL OR reason = $6)
           AND ($7::text IS NULL OR status = $7)
-          AND ($8::text IS NULL OR owed_at >= $8::date)
-          AND ($9::text IS NULL OR owed_at < $9::date + INTERVAL '1 day')
+          AND ($8::text IS NULL OR owed_at >= $8::text::date)
+          AND ($9::text IS NULL OR owed_at < $9::text::date + INTERVAL '1 day')
           AND ($10::text IS NULL OR id IN (
               SELECT id FROM tl3_postmortems WHERE search @@ websearch_to_tsquery('english', $10)
               UNION SELECT postmortem_id FROM tl3_postmortem_recommendations WHERE search @@ websearch_to_tsquery('english', $10)))

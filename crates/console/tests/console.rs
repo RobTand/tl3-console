@@ -19,6 +19,7 @@ fn main() {
         postmortem_scenarios();
         return;
     }
+    postmortem_scenarios();
     let mut database = Database::start();
     let settings = database.create("console");
     let records = tempfile::tempdir().unwrap();

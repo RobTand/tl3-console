@@ -82,6 +82,8 @@ export function CommandsProvider(props: {
 
 export function actionLabel(action: Action): string {
   switch (action.kind) {
+    case "postmortem":
+      return "Write postmortem";
     case "pause":
       return "Pause";
     case "resume":

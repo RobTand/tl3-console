@@ -26,6 +26,7 @@ export function useLiveBoard(): { board: Board | undefined; connection: Connecti
         database: setDatabase,
         state: setStream,
         commands: (event) => setCommands(event.commands),
+        postmortems: () => { void client.invalidateQueries({ queryKey: ["postmortems"] }); },
       },
       browserEnvironment(),
     );

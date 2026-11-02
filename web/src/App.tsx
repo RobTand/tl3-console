@@ -17,6 +17,8 @@ const PromptsPage = lazy(() =>
   import("./features/prompts/PromptsPage").then((module) => ({ default: module.PromptsPage })),
 );
 
+const PostmortemsPage = lazy(() => import("./features/postmortems/PostmortemsPage").then((module) => ({ default: module.PostmortemsPage })));
+
 const ALL_REPOS = "*";
 
 function RepoFilter(props: { repos: string[]; value: string | null; onChange: (repo: string | null) => void }) {
@@ -86,6 +88,7 @@ function Pages({ route }: { route: Route }) {
   const pages: Array<[Route, string]> = [
     [{ page: "board" }, "Board"],
     [{ page: "prompts", role: null }, "Prompts"],
+    [{ page: "postmortems" }, "Postmortems"],
   ];
   return (
     <nav aria-label="Pages" className="inline-flex h-8 rounded-md border border-border bg-surface p-0.5">
@@ -138,7 +141,7 @@ export function App() {
           <ThemeSwitch />
         </div>
       </header>
-      {route.page === "prompts" ? (
+      {route.page === "postmortems" ? <Suspense fallback={<main className="p-4 text-sm text-muted">Loading postmortems…</main>}><PostmortemsPage /></Suspense> : route.page === "prompts" ? (
         <Suspense
           fallback={
             <main className="flex flex-1 items-center justify-center text-sm text-muted">Loading prompts…</main>

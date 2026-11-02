@@ -1,4 +1,4 @@
-import { Dialog } from "radix-ui";
+import { Dialog, Tabs } from "radix-ui";
 import { useId, type ReactElement, type ReactNode } from "react";
 import type {
   BlockedReport,
@@ -18,6 +18,7 @@ import type {
 import { IssueLink } from "../../components/IssueLink";
 import { elapsed } from "../../time";
 import { useCaseFile } from "./live";
+import { PostmortemTab } from "../postmortems/PostmortemTab";
 
 const COLUMNS: Record<Column, string> = {
   Backlog: "Backlog",
@@ -403,16 +404,10 @@ export function CaseFileView(props: {
   title?: (heading: ReactElement) => ReactElement;
   /** What Rob can do with the request, shown under its links. */
   actions?: ReactNode;
+  postmortem?: ReactNode;
 }) {
   const { file, now } = props;
-  return (
-    <article className="text-text">
-      <Header
-        card={file.card}
-        links={file.links}
-        title={props.title ?? ((heading) => heading)}
-        actions={props.actions}
-      />
+  const details = <>
       <Counters card={file.card} />
       {file.question !== null && <Question question={file.question} />}
       <Timeline timeline={file.timeline} />
@@ -421,6 +416,22 @@ export function CaseFileView(props: {
       {file.blocked.length > 0 && <Blocked blocked={file.blocked} />}
       {file.children.length > 0 && <Children items={file.children} />}
       {file.summary !== null && <Summary summary={file.summary} />}
+  </>;
+  return (
+    <article className="text-text">
+      <Header
+        card={file.card}
+        links={file.links}
+        title={props.title ?? ((heading) => heading)}
+        actions={props.actions}
+      />
+      {props.postmortem ? <Tabs.Root defaultValue={new URLSearchParams(window.location.search).get("tab") === "postmortem" ? "postmortem" : "case"}>
+        <Tabs.List aria-label="Case file tabs" className="flex gap-1 border-t border-border px-4 pt-2">
+          {[["case", "Case file"], ["postmortem", "Postmortem"]].map(([value, label]) => <Tabs.Trigger key={value} value={value ?? "case"} className="rounded-t px-3 py-2 text-xs text-muted data-[state=active]:bg-surface-2 data-[state=active]:text-text">{label}</Tabs.Trigger>)}
+        </Tabs.List>
+        <Tabs.Content value="case">{details}</Tabs.Content>
+        <Tabs.Content value="postmortem">{props.postmortem}</Tabs.Content>
+      </Tabs.Root> : details}
     </article>
   );
 }
@@ -460,10 +471,12 @@ export function CaseDrawer(props: {
             )}
             {shown ? (
               <CaseFileView
+                key={shown.card.id}
                 file={shown}
+                postmortem={<PostmortemTab id={shown.card.id} />}
                 now={props.now}
                 title={(heading) => <Dialog.Title asChild>{heading}</Dialog.Title>}
-                actions={props.card && props.actions?.(props.card)}
+                actions={props.actions?.(shown.card)}
               />
             ) : (
               <Dialog.Title className="px-4 pt-12 text-sm font-normal text-muted">

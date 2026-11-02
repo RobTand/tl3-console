@@ -16,7 +16,7 @@ const postmortem = {
 function setup(status = "owed") {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(
     url.includes("postmortems")
-      ? { postmortems: [{ ...postmortem, status }], grades: [{ id: 1, node_id: "1", trigger: "close", rubric_version: 1, dimension: "reliability", grade: 4, fact: { fix_rounds: 1 }, recorded_ms: T0 }], next_before: null, next_grade_before: null }
+      ? { postmortems: [{ ...postmortem, status }], grades: [{ id: 1, node_id: "1", trigger: "close", rubric_version: 1, dimension: "reliability", grade: 4, fact: { fix_rounds: 1 }, recorded_ms: T0 }], next_before: null, next_grade_before: null, active: status === "owed" || status === "running" }
       : caseFile(),
   ))));
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
