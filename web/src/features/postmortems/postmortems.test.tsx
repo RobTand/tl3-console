@@ -5,6 +5,7 @@ import { CaseDrawer } from "../case-file/CaseDrawer";
 import { caseFile, T0 } from "../case-file/fixtures";
 import { CardCommands, CommandsProvider } from "../commands";
 import { card } from "../../fixtures";
+import { PostmortemTab } from "./PostmortemTab";
 
 const postmortem = {
   id: 3,
@@ -109,4 +110,23 @@ it("offers one confirmation on Needs Rob and files the typed command", async () 
   expect(file).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Confirm postmortem" }));
   expect(file).toHaveBeenCalledWith(1, expect.any(String), { kind: "postmortem" });
+});
+
+
+it.each([
+  { next_before: null, next_grade_before: 100, expected: "before=1&grade_before=100" },
+  { next_before: 50, next_grade_before: null, expected: "before=50&grade_before=1" },
+])("keeps an exhausted collection finished while paging the other: $expected", async (cursor) => {
+  const { wrap } = setup();
+  const fetchPage = vi.fn(async () => new Response(JSON.stringify({
+    postmortems: [], grades: [], active: false, ...cursor,
+  })));
+  vi.stubGlobal("fetch", fetchPage);
+  render(<PostmortemTab id={1} />, { wrapper: wrap });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Load older postmortems and facts" }));
+  expect(fetchPage).toHaveBeenLastCalledWith(
+    `/api/requests/1/postmortems?${cursor.expected}`,
+    expect.objectContaining({ signal: expect.any(AbortSignal) }),
+  );
 });
