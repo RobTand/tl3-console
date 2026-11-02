@@ -85,3 +85,43 @@ rust_test(
     use_libtest_harness = False,
     deps = _TEST_DEPS,
 )
+
+rust_binary(
+    name = "case_file_scale",
+    srcs = ["examples/case_file_scale.rs"] + _SUPPORT,
+    aliases = aliases(normal = True, normal_dev = True),
+    crate_root = "examples/case_file_scale.rs",
+    edition = "2024",
+    deps = _TEST_DEPS,
+)
+
+rust_test(
+    name = "case_file_test",
+    size = "large",
+    srcs = ["tests/case_file.rs"] + _SUPPORT,
+    aliases = aliases(normal = True, normal_dev = True),
+    compile_data = ["tests/fixtures/tl3-example.toml"],
+    crate_root = "tests/case_file.rs",
+    data = _POSTGRES_FILES,
+    edition = "2024",
+    env = _POSTGRES_ENV,
+    # Embedded Postgres, the simulated controller and the console side by side.
+    exec_properties = {"EstimatedCPU": "4", "EstimatedMemory": "8GB"},
+    tags = ["rust"],
+    use_libtest_harness = False,
+    deps = _TEST_DEPS,
+)
+
+# Reads the console's sources and the lockfile, so it sees what the console
+# could call.
+rust_test(
+    name = "outside_calls_test",
+    size = "small",
+    srcs = ["tests/outside_calls.rs"],
+    aliases = aliases(normal = True, normal_dev = True),
+    crate_root = "tests/outside_calls.rs",
+    data = glob(["src/**/*.rs"]) + ["//:Cargo.lock"],
+    edition = "2024",
+    tags = ["rust"],
+    deps = _TEST_DEPS,
+)

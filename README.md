@@ -136,10 +136,16 @@ assets = "/home/rob/.local/share/tl3-console/current/assets"
 user = "tl3_console"
 password_file = "/home/rob/.config/tl3/secrets/console-postgres-password"
 tl3_config = "/home/rob/.config/tl3/tl3.toml"
+traces = "http://192.168.1.107:5033/#/experiments/2/traces"
 ```
 
+`traces` is optional. With it, the case file links each worker run to its
+MLflow traces; without it, runs have no trace link. Deploy writes the file only
+once, so add the line by hand to an existing install and restart the console.
+
 The console reads `tl3.toml` with the pinned TL3's own parser and uses only its
-`[store]` and `[models]` sections.
+`[store]` and `[models]` sections and its served repositories, whose branch
+templates name the case file's branch links.
 
 ## The TL3 pin
 
