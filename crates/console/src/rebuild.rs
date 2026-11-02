@@ -16,6 +16,7 @@ pub(crate) enum Change {
     Progress,
     /// Console commands filed, and any progress with them.
     Commands,
+    Postmortems,
     World,
 }
 

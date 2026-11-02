@@ -63,6 +63,17 @@ fn change(tables: &BTreeSet<String>) -> Change {
         .all(|table| progress(table) || table == "tl3_console_commands")
     {
         Change::Commands
+    } else if tables.iter().all(|table| {
+        progress(table)
+            || matches!(
+                table.as_str(),
+                "tl3_console_commands"
+                    | "tl3_postmortems"
+                    | "tl3_postmortem_recommendations"
+                    | "tl3_code_grades"
+            )
+    }) {
+        Change::Postmortems
     } else {
         Change::World
     }

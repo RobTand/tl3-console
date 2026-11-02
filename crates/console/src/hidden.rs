@@ -39,6 +39,10 @@ impl HiddenRepos {
         Ok(Self(hidden))
     }
 
+    pub(crate) fn names(&self) -> Vec<String> {
+        self.0.iter().cloned().collect()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
