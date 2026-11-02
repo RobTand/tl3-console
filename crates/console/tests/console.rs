@@ -33,6 +33,7 @@ fn main() {
             assets: assets.path().into(),
             models: None,
             links: Default::default(),
+            public_hosts: vec![],
         },
     )
     .unwrap();
@@ -47,6 +48,8 @@ fn main() {
     println!("test serves_board_and_web_app ... ok");
     console_reads_through_a_role_that_cannot_write(&settings);
     println!("test console_reads_through_a_role_that_cannot_write ... ok");
+    refuses_hosts_the_console_does_not_serve(&settings, assets.path());
+    println!("test refuses_hosts_the_console_does_not_serve ... ok");
     cards_follow_the_quota_fallback(&settings, assets.path());
     println!("test cards_follow_the_quota_fallback ... ok");
     let (filer, mut filer_stream, node) =
@@ -73,7 +76,7 @@ fn main() {
     streams_again_after_postgres_restarts(address, &mut database, &settings, records.path());
     println!("test streams_again_after_postgres_restarts ... ok");
     database.stop();
-    println!("16 console scenarios passed; no skips");
+    println!("17 console scenarios passed; no skips");
 }
 
 fn bootstrap() -> Bootstrap {
@@ -365,7 +368,7 @@ impl EventStream {
             .unwrap_or_default();
         write!(
             socket,
-            "GET /api/stream HTTP/1.1\r\nHost: console\r\nAccept: text/event-stream\r\n{resume}\r\n"
+            "GET /api/stream HTTP/1.1\r\nHost: {address}\r\nAccept: text/event-stream\r\n{resume}\r\n"
         )
         .unwrap();
         let mut reader = BufReader::new(socket);
@@ -490,7 +493,7 @@ fn get(address: SocketAddr, path: &str) -> (u16, String, Vec<u8>) {
         .unwrap();
     write!(
         socket,
-        "GET {path} HTTP/1.1\r\nHost: console\r\nConnection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
     )
     .unwrap();
     let mut reader = BufReader::new(socket);
@@ -505,6 +508,132 @@ fn get(address: SocketAddr, path: &str) -> (u16, String, Vec<u8>) {
     (status, headers, body)
 }
 
+/// One raw HTTP/1.1 request naming whatever Host the caller likes, or none
+/// (HTTP/1.0). Returns the status and the whole body.
+fn request(
+    address: SocketAddr,
+    method: &str,
+    path: &str,
+    host: Option<&str>,
+    headers: &str,
+) -> (u16, String) {
+    let mut socket = TcpStream::connect(address).unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    match host {
+        Some(host) => write!(
+            socket,
+            "{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n{headers}\r\n"
+        ),
+        None => write!(socket, "{method} {path} HTTP/1.0\r\n{headers}\r\n"),
+    }
+    .unwrap();
+    let mut reader = BufReader::new(socket);
+    let (status, headers) = response_head(&mut reader);
+    let mut body = Vec::new();
+    if headers.contains("transfer-encoding: chunked") {
+        body = ChunkedBody::new(reader).rest();
+    } else {
+        reader.read_to_end(&mut body).unwrap();
+    }
+    (status, String::from_utf8_lossy(&body).into_owned())
+}
+
+/// DNS rebinding: a page on another site points its own name at the console,
+/// and the browser sends that name as Host, with an Origin that matches it.
+/// Every route is refused for any Host the console doesn't serve, and nothing
+/// is served.
+fn refuses_hosts_the_console_does_not_serve(settings: &tl3_config::Store, assets: &Path) {
+    let console = tl3_console::start(
+        TcpListener::bind("127.0.0.1:0").unwrap(),
+        tl3_console::Options {
+            store: settings.clone(),
+            assets: assets.into(),
+            models: None,
+            links: Default::default(),
+            public_hosts: vec!["Console.Example.Test".into()],
+        },
+    )
+    .unwrap();
+    let address = console.address();
+    let port = address.port();
+    // The board is built before the served names are compared against it.
+    assert_eq!(
+        EventStream::open(address, None).board_event().name,
+        "snapshot"
+    );
+    let routes = [
+        "/api/board",
+        "/api/stream",
+        "/api/requests/42",
+        "/api/nothing-here",
+        "/",
+        "/index.html",
+        "/missing-asset.js",
+    ];
+    let own_host = address.to_string();
+    for evil in [
+        "evil.example".to_string(),
+        format!("evil.example:{port}"),
+        // The right port on the wrong name, and the right name on a wrong port.
+        format!("192.168.1.107:{port}"),
+        format!("127.0.0.1:{}", port.wrapping_add(1)),
+        // Without the port, the browser's default, it is not the bound address.
+        "127.0.0.1".to_string(),
+        "console.example.test.evil.example".to_string(),
+    ] {
+        for path in routes {
+            for headers in [
+                String::new(),
+                format!("Origin: http://{evil}\r\nSec-Fetch-Site: same-origin\r\n"),
+            ] {
+                let (status, body) = request(address, "GET", path, Some(&evil), &headers);
+                assert_eq!(status, 421, "GET {path} as {evil}: {body}");
+                assert_eq!(body, "This console doesn't answer to that host name.\n");
+            }
+        }
+        // A write is refused before its route, or the lack of one, is known.
+        let (status, _) = request(
+            address,
+            "POST",
+            "/api/board",
+            Some(&evil),
+            "Content-Length: 0\r\n",
+        );
+        assert_eq!(status, 421, "POST as {evil}");
+    }
+    // HTTP/1.0 without a Host header names no host at all.
+    for path in routes {
+        let (status, body) = request(address, "GET", path, None, "");
+        assert_eq!(status, 421, "GET {path} without Host: {body}");
+    }
+    // The bound address, `localhost` on loopback and a configured name (in
+    // any case) are served.
+    for host in [
+        own_host.as_str(),
+        &format!("localhost:{port}"),
+        "console.example.test",
+        "CONSOLE.example.test",
+    ] {
+        let (status, body) = request(address, "GET", "/api/board", Some(host), "");
+        assert_eq!(status, 200, "GET /api/board as {host}: {body}");
+        assert!(body.contains("\"revision\""), "{body}");
+        let (status, body) = request(address, "GET", "/", Some(host), "");
+        assert_eq!(status, 200, "GET / as {host}");
+        assert!(body.contains("TL3 console"), "{body}");
+    }
+    // Past the allowlist, a route that takes no writes still says so.
+    let (status, _) = request(
+        address,
+        "POST",
+        "/api/board",
+        Some(&own_host),
+        "Content-Length: 0\r\n",
+    );
+    assert_eq!(status, 405);
+}
+
 /// A console started before tl3d migrates the store builds the board once the
 /// schema matches, without waiting for a controller commit.
 fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
@@ -516,6 +645,7 @@ fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
             assets: assets.into(),
             models: None,
             links: Default::default(),
+            public_hosts: vec![],
         },
     )
     .unwrap();
@@ -552,6 +682,7 @@ fn start_console(settings: &tl3_config::Store, assets: &Path) -> tl3_console::Ru
             assets: assets.into(),
             models: None,
             links: Default::default(),
+            public_hosts: vec![],
         },
     )
     .unwrap()
@@ -679,6 +810,7 @@ fn cards_follow_the_quota_fallback(settings: &tl3_config::Store, assets: &Path) 
             assets: assets.into(),
             models: Some(config.models),
             links: Default::default(),
+            public_hosts: vec![],
         },
     )
     .unwrap();
@@ -715,7 +847,7 @@ fn cards_follow_the_quota_fallback(settings: &tl3_config::Store, assets: &Path) 
 }
 
 fn post(address: SocketAddr, path: &str, headers: &str, body: &str) -> (u16, Vec<u8>) {
-    request(
+    request_with_body(
         address,
         "POST",
         path,
@@ -726,7 +858,7 @@ fn post(address: SocketAddr, path: &str, headers: &str, body: &str) -> (u16, Vec
 }
 
 /// One raw HTTP/1.1 request, naming whatever Host the caller likes.
-fn request(
+fn request_with_body(
     address: SocketAddr,
     method: &str,
     path: &str,
@@ -780,6 +912,7 @@ fn a_command_round_trips_to_tl3d_and_back(
             assets: assets.into(),
             models: None,
             links: Default::default(),
+            public_hosts: vec![],
         },
     )
     .unwrap();
