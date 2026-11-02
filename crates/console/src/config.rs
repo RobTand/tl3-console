@@ -6,6 +6,7 @@
 //! user = "tl3_console"
 //! password_file = "/home/rob/.config/tl3/secrets/console-postgres-password"
 //! tl3_config = "/home/rob/.config/tl3/tl3.toml"
+//! traces = "http://192.168.1.107:5033/#/experiments/2/traces"
 //! ```
 //!
 //! The console reads `tl3.toml` with the pinned TL3's own parser, and keeps
@@ -26,8 +27,12 @@ pub struct File {
     /// The read-only Postgres login TL3's `tl3-deploy console-role` grants.
     pub user: String,
     pub password_file: PathBuf,
-    /// TL3's config, read for `[store]` and `[models]` only.
+    /// TL3's config, read for `[store]`, `[models]` and the served repos only.
     pub tl3_config: PathBuf,
+    /// The MLflow UI's traces page for TL3's experiment. The case file links
+    /// each worker run to its traces there; without it, runs have no link.
+    #[serde(default)]
+    pub traces: Option<String>,
 }
 
 /// What the console runs with.
@@ -37,6 +42,8 @@ pub struct Settings {
     pub assets: PathBuf,
     pub store: tl3_config::Store,
     pub models: tl3_config::Models,
+    /// Where the case file's links point.
+    pub links: crate::case_file::Links,
 }
 
 impl Settings {
@@ -61,6 +68,7 @@ impl Settings {
                 password_file: Some(file.password_file),
                 ..tl3.store
             },
+            links: crate::case_file::Links::new(file.traces.as_deref(), &tl3.github.repos)?,
             models: tl3.models,
         })
     }
@@ -210,6 +218,19 @@ mod tests {
         rejects(&[("tl3_config", "\"tl3.toml\"")], "tl3_config");
         rejects(&[("user", "\"tl3 console\"")], "user");
         rejects(&[("user", "")], "user");
+        rejects(&[("traces", "\"file:///etc/passwd\"")], "traces");
+    }
+
+    #[test]
+    fn links_run_to_the_traces_page_and_tl3s_branches() {
+        let settings = Settings::parse(&console(&[]), TL3).unwrap();
+        assert_eq!(settings.links.traces, None);
+        let traces = "http://192.168.1.107:5033/#/experiments/2/traces";
+        let settings =
+            Settings::parse(&console(&[("traces", &format!("{traces:?}"))]), TL3).unwrap();
+        assert_eq!(settings.links.traces.as_deref(), Some(traces));
+        let tl3 = tl3_config::Config::parse(TL3).unwrap();
+        assert_eq!(settings.links.branches.len(), tl3.github.repos.len());
     }
 
     #[test]

@@ -34,6 +34,7 @@ fn run() -> tl3_console::Result<()> {
             store: settings.store,
             assets: settings.assets,
             models: Some(settings.models),
+            links: settings.links,
         },
     )?;
     println!("Console listening on http://{}", running.address());
