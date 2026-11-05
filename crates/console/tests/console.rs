@@ -768,7 +768,10 @@ fn pinned_migrations_match_the_pinned_tl3(database: &mut Database) {
 /// the board keep working, and the log says which versions are extra.
 fn accepts_a_newer_schema_with_a_warning(database: &mut Database, assets: &Path) {
     let settings = database.create("console_newer_schema");
-    drop(Store::open(&settings).unwrap());
+    let records = tempfile::tempdir().unwrap();
+    let mut controller = open(&settings, records.path());
+    controller.intake(issue(42)).unwrap();
+    drop(controller);
     let next = pinned_version(&settings) + 1;
     add_migration(&settings, next);
     add_migration(&settings, next + 1);
@@ -784,6 +787,29 @@ fn accepts_a_newer_schema_with_a_warning(database: &mut Database, assets: &Path)
     let mut stream = EventStream::open_with_guard(console.address(), None, Duration::from_secs(20));
     assert_eq!(stream.board_event().name, "snapshot");
     assert_eq!(get(console.address(), "/api/board").0, 200);
+    let address = console.address();
+    let id = "00000000-0000-4000-8000-000000000042";
+    let headers = format!("X-TL3-Console: 1\r\nOrigin: http://{address}\r\n");
+    let body = format!(r#"{{"id":"{id}","action":{{"kind":"pause"}}}}"#);
+    assert_eq!(
+        post(address, "/api/requests/0/commands", &headers, &body).0,
+        202
+    );
+    assert!(filed(&settings, id));
+    loop {
+        let event = stream.event();
+        if event.name == "commands" {
+            assert!(
+                event.data["commands"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|command| command["id"] == id)
+            );
+            break;
+        }
+        assert_eq!(event.name, "patch");
+    }
 }
 
 /// A store behind the pinned TL3 lacks tables the board reads.
