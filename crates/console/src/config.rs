@@ -333,7 +333,7 @@ mod tests {
             if let Some(store) = store {
                 value["store"] = store;
             }
-            let error = Settings::parse(&console(&[]), &value.to_string())
+            let error = Settings::parse(&console(&[]), &toml::to_string(&value).unwrap())
                 .unwrap_err()
                 .to_string();
             assert!(error.contains("tl3_config"), "{error}");
