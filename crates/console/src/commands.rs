@@ -4,6 +4,7 @@
 //! can't send, and a same-origin browser.
 
 use crate::api::{CommandRequest, Filed};
+use crate::schema::ConsoleCommands;
 use crate::{schema::Session, sessions::Sessions};
 use axum::{
     Json, Router,
@@ -14,7 +15,6 @@ use axum::{
 };
 use std::sync::{Arc, Mutex};
 use tl3_controller::console::{Action, Choice, CommandRecord};
-use tl3_store::ConsoleCommands;
 
 /// Browsers never send this header cross-site without a CORS preflight,
 /// which the console never grants.

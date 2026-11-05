@@ -787,6 +787,8 @@ fn accepts_a_newer_schema_with_a_warning(database: &mut Database, assets: &Path)
     let mut stream = EventStream::open_with_guard(console.address(), None, Duration::from_secs(20));
     assert_eq!(stream.board_event().name, "snapshot");
     assert_eq!(get(console.address(), "/api/board").0, 200);
+    // Drain the startup events before checking the command's notification.
+    while stream.event().name != "postmortems" {}
     let address = console.address();
     let id = "00000000-0000-4000-8000-000000000042";
     let headers = format!("X-TL3-Console: 1\r\nOrigin: http://{address}\r\n");

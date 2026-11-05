@@ -176,6 +176,50 @@ impl Listener {
     }
 }
 
+/// Command filing uses the same checked compatibility path as the readers.
+pub(crate) enum ConsoleCommands {
+    Pinned(tl3_store::ConsoleCommands),
+    Ahead(Client),
+}
+
+impl ConsoleCommands {
+    pub(crate) fn open(store: &tl3_config::Store) -> tl3_store::Result<Self> {
+        match tl3_store::ConsoleCommands::open(store) {
+            Ok(commands) => Ok(Self::Pinned(commands)),
+            Err(tl3_store::Error::SchemaVersion { actual, expected }) if actual > expected => {
+                let mut client = connect(store)?;
+                let extra = Session::check_ahead(&mut client)?;
+                eprintln!("console command filer: {}", warning(&extra));
+                Ok(Self::Ahead(client))
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    pub(crate) fn submit(
+        &mut self,
+        id: &str,
+        node: u64,
+        action: &serde_json::Value,
+    ) -> tl3_store::Result<bool> {
+        let client = match self {
+            Self::Pinned(commands) => return commands.submit(id, node, action),
+            Self::Ahead(client) => client,
+        };
+        let node =
+            i64::try_from(node).map_err(|_| tl3_store::Error::Invalid("node id out of range"))?;
+        let mut tx = client.build_transaction().read_only(false).start()?;
+        let filed = tx
+            .query_one(
+                "SELECT tl3_console_command($1, $2, $3)",
+                &[&id, &node, action],
+            )?
+            .get(0);
+        tx.commit()?;
+        Ok(filed)
+    }
+}
+
 /// Connect the way the pinned TL3's reader does.
 fn connect(settings: &tl3_config::Store) -> tl3_store::Result<Client> {
     Ok(config(settings)?.connect(NoTls)?)
