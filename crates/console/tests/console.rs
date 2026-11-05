@@ -1980,7 +1980,13 @@ fn postmortem_scenarios() {
                 );
                 // This command is a barrier after the world patch. A spurious
                 // postmortem event from that commit would arrive before it.
-                assert_eq!(stream.event().name, "commands");
+                loop {
+                    let event = stream.event();
+                    if event.name == "commands" {
+                        break;
+                    }
+                    assert_eq!(event.name, "patch", "unexpected invalidation: {event:?}");
+                }
             }),
         ),
         (

@@ -46,8 +46,7 @@ crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
 crate.from_cargo(
     name = "crates",
     cargo_lockfile = "@bazel_cargo_lock//:Cargo.lock",
-    # This derived repository input must keep the digest recorded in the module lock.
-    skip_cargo_lockfile_overwrite = True,
+    skip_cargo_lockfile_overwrite = False,
     supported_platform_triples = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"],
     manifests = ["//:Cargo.toml"],
 )

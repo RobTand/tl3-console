@@ -19,7 +19,7 @@ use tl3_controller::{
     Bootstrap, Controller, LabelledIssue, Repository, adapters,
     executor::{Completion, Delivery, Executor, Observation, Output, Reconciliation, Upstream},
 };
-use tl3_kernel::{Command, EffectKind, Event, Fact, NodeId, Reply, Role};
+use tl3_kernel::{EffectKind, Event, Fact, NodeId, Reply, Role};
 use tl3_store::Store;
 
 const MERGED: u64 = 0;
@@ -87,14 +87,12 @@ fn main() {
 
     // Rob stops the request that waits on him. The issue stays open, so it
     // waits in the backlog, not in Done.
-    controller
-        .observe(
-            "case-file-stop",
-            Observation::Kernel(Event::Command {
-                node: NodeId(AWAITING_ROB),
-                id: 1,
-                command: Command::Stop,
-            }),
+    tl3_store::ConsoleCommands::open(&settings)
+        .unwrap()
+        .submit(
+            "00000000-0000-4000-8000-000000000003",
+            AWAITING_ROB,
+            &json!({"kind": "stop"}),
         )
         .unwrap();
     drive(&mut controller, AWAITING_ROB, |n| n.phase.is_closed());
