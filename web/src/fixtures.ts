@@ -22,6 +22,8 @@ export function card(fields: Partial<Card> & { id: number }): Card {
     phase: "Making the change",
     ending: null,
     waiting_on: "the current task to finish",
+    priority: "unranked",
+    pool_position: null,
     role: "Maker",
     model: "gpt-6.1-sol (high)",
     attempt: 1,
