@@ -318,6 +318,36 @@ mod tests {
     }
 
     #[test]
+    fn tolerates_future_tl3_fields_without_changing_used_settings() {
+        let future = include_str!("../tests/fixtures/tl3-future.toml");
+        let expected = Settings::parse(&console(&[]), TL3).unwrap();
+        let actual = Settings::parse(&console(&[]), future).unwrap();
+        assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+    }
+
+    #[test]
+    fn refuses_missing_or_malformed_tl3_store() {
+        let mut value: toml::Value = toml::from_str(TL3).unwrap();
+        for store in [None, Some(toml::Value::String("wrong".into()))] {
+            value.as_table_mut().unwrap().remove("store");
+            if let Some(store) = store {
+                value["store"] = store;
+            }
+            let error = Settings::parse(&console(&[]), &value.to_string())
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("tl3_config"), "{error}");
+            assert!(error.contains("store"), "{error}");
+        }
+        let malformed = TL3.replace("port = 5432", "port = \"wrong\"");
+        let error = Settings::parse(&console(&[]), &malformed)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("tl3_config"), "{error}");
+        assert!(error.contains("port"), "{error}");
+    }
+
+    #[test]
     fn refuses_a_tl3_config_its_tl3_cannot_parse() {
         let error = Settings::parse(&console(&[]), "[store]\nport = \"x\"\n")
             .unwrap_err()

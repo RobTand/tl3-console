@@ -62,7 +62,7 @@ rust_binary(
 rust_test(
     name = "lib_test",
     size = "small",
-    compile_data = ["migrations.pin", "tests/fixtures/tl3-example.toml"],
+    compile_data = ["migrations.pin", "tests/fixtures/tl3-example.toml", "tests/fixtures/tl3-future.toml"],
     crate = ":tl3_console",
     data = ["//web:api_types"],
     env = {"TL3_API_TYPES": "$(rootpath //web:api_types)"},
