@@ -787,31 +787,29 @@ fn accepts_a_newer_schema_with_a_warning(database: &mut Database, assets: &Path)
     let mut stream = EventStream::open_with_guard(console.address(), None, Duration::from_secs(20));
     assert_eq!(stream.board_event().name, "snapshot");
     assert_eq!(get(console.address(), "/api/board").0, 200);
-    // Drain the startup events before checking the command's notification.
+    // Drain startup events before checking that a refused command emits none.
     while stream.event().name != "postmortems" {}
     let address = console.address();
     let id = "00000000-0000-4000-8000-000000000042";
     let headers = format!("X-TL3-Console: 1\r\nOrigin: http://{address}\r\n");
     let body = format!(r#"{{"id":"{id}","action":{{"kind":"pause"}}}}"#);
-    assert_eq!(
-        post(address, "/api/requests/0/commands", &headers, &body).0,
-        202
+    let (status, reply) = post(address, "/api/requests/0/commands", &headers, &body);
+    assert_eq!(status, 503);
+    let reply = String::from_utf8(reply).unwrap();
+    assert!(
+        reply.contains("schema") && reply.contains("not filed"),
+        "{reply}"
     );
-    assert!(filed(&settings, id));
-    loop {
-        let event = stream.event();
-        if event.name == "commands" {
-            assert!(
-                event.data["commands"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|command| command["id"] == id)
-            );
-            break;
-        }
-        assert_eq!(event.name, "patch");
-    }
+    assert!(!filed(&settings, id));
+    // A feed barrier after the refused POST: any commands event would precede it.
+    raw(&settings)
+        .batch_execute("NOTIFY tl3_changes, 'tl3_postmortems'")
+        .unwrap();
+    assert_eq!(
+        stream.event().name,
+        "postmortems",
+        "no commands event was emitted"
+    );
 }
 
 /// A store behind the pinned TL3 lacks tables the board reads.
