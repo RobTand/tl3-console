@@ -349,7 +349,7 @@ mod tests {
         value
             .as_table_mut()
             .unwrap()
-            .retain(|key, _| matches!(key.as_str(), "store" | "models" | "github"));
+            .retain(|key, _| matches!(key, "store" | "models" | "github"));
         Settings::parse(&console(&[]), &toml::to_string(&value).unwrap()).unwrap();
     }
 
