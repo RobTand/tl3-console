@@ -47,7 +47,15 @@ id: number,
 /**
  * `owner/name`.
  */
-repo: string, issue: number, title: string, column: Column, phase: string, ending: Ending | null, waiting_on: string, role: string | null, model: string | null, attempt: number, round: number, retries: Retries, 
+repo: string, issue: number, title: string, column: Column, phase: string, ending: Ending | null, waiting_on: string, 
+/**
+ * Q39: `P0`–`P3`, or `unranked`.
+ */
+priority: string, 
+/**
+ * Q39: 1-based place in the agent-pool line, while the request waits for a slot.
+ */
+pool_position: number | null, role: string | null, model: string | null, attempt: number, round: number, retries: Retries, 
 /**
  * None until ingest sets up the request's credit.
  */

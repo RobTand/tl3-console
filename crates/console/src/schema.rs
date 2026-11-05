@@ -130,8 +130,58 @@ fn judge_applied(tx: &mut Transaction<'_>) -> tl3_store::Result<Vec<i32>> {
     judge(&pinned_migrations(), &applied).map_err(|Conflict| tl3_store::Error::MigrationMismatch)
 }
 
+/// The change feed follows the same newer-store policy as read sessions.
+pub(crate) enum Listener {
+    Pinned(tl3_store::Listener),
+    Ahead(Client),
+}
+
+impl Listener {
+    pub(crate) fn open(store: &tl3_config::Store) -> tl3_store::Result<Self> {
+        match tl3_store::Listener::open(store) {
+            Ok(listener) => Ok(Self::Pinned(listener)),
+            Err(tl3_store::Error::SchemaVersion { actual, expected }) if actual > expected => {
+                // Match TL3's LISTEN keepalives so dead peers trigger reconnection.
+                let mut client = config(store)?
+                    .keepalives(true)
+                    .keepalives_idle(Duration::from_secs(60))
+                    .keepalives_interval(Duration::from_secs(10))
+                    .keepalives_retries(3)
+                    .connect(NoTls)?;
+                let extra = Session::check_ahead(&mut client)?;
+                eprintln!("console change feed: {}", warning(&extra));
+                client.batch_execute("LISTEN tl3_changes")?;
+                Ok(Self::Ahead(client))
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    pub(crate) fn wait(&mut self) -> tl3_store::Result<std::collections::BTreeSet<String>> {
+        use postgres::fallible_iterator::FallibleIterator;
+        let client = match self {
+            Self::Pinned(listener) => return listener.wait(),
+            Self::Ahead(client) => client,
+        };
+        let mut notifications = client.notifications();
+        let Some(first) = notifications.blocking_iter().next()? else {
+            return Err(tl3_store::Error::Invalid("change feed session closed"));
+        };
+        let mut tables = std::collections::BTreeSet::from([first.payload().to_string()]);
+        let mut pending = notifications.iter();
+        while let Some(next) = pending.next()? {
+            tables.insert(next.payload().to_string());
+        }
+        Ok(tables)
+    }
+}
+
 /// Connect the way the pinned TL3's reader does.
 fn connect(settings: &tl3_config::Store) -> tl3_store::Result<Client> {
+    Ok(config(settings)?.connect(NoTls)?)
+}
+
+fn config(settings: &tl3_config::Store) -> tl3_store::Result<postgres::Config> {
     settings.validate()?;
     let mut connection = postgres::Config::new();
     connection
@@ -147,7 +197,7 @@ fn connect(settings: &tl3_config::Store) -> tl3_store::Result<Client> {
         let password = password.strip_suffix(b"\r").unwrap_or(password);
         connection.password(password);
     }
-    Ok(connection.connect(NoTls)?)
+    Ok(connection)
 }
 
 #[cfg(test)]

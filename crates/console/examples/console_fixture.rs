@@ -23,7 +23,7 @@ use tl3_controller::{
     board::{self, Column},
     executor::{Completion, Delivery, Executor, Observation, Output, Reconciliation, Upstream},
 };
-use tl3_kernel::{Command, EarlyEnd, EffectKind, Event, Fact, NodeId, Reply, Role};
+use tl3_kernel::{EarlyEnd, EffectKind, Event, Fact, NodeId, Reply, Role};
 use tl3_store::{Reader, Store};
 
 const REPOS: [&str; 4] = ["tl3-sandbox", "prismabuild", "prismaquant", "tessera"];
@@ -174,6 +174,7 @@ fn main() {
             rob: 24923402,
             slots: 2,
             pool: 2,
+            fail_fast: false,
         },
     )
     .unwrap();
@@ -204,15 +205,16 @@ fn main() {
             }
         }
     }
-    for (node, command) in [(NodeId(5), Command::Pause), (NodeId(4), Command::Stop)] {
-        let event = Event::Command {
-            node,
-            id: 1,
-            command,
-        };
-        controller
-            .observe(&format!("fixture-{}", node.0), Observation::Kernel(event))
+    let mut commands = tl3_store::ConsoleCommands::open(&settings).unwrap();
+    for (node, kind) in [(5, "pause"), (4, "stop")] {
+        commands
+            .submit(
+                &format!("00000000-0000-4000-8000-{node:012}"),
+                node,
+                &json!({"kind": kind}),
+            )
             .unwrap();
+        tl3_controller::ingress::drain(&mut controller).unwrap();
         controller.drive_once().unwrap();
     }
     controller
@@ -252,16 +254,14 @@ fn main() {
         ))
         .unwrap();
     let stopped = controller.world().unwrap().nodes.len() as u64 - 1;
-    controller
-        .observe(
-            "fixture-stopped",
-            Observation::Kernel(Event::Command {
-                node: NodeId(stopped),
-                id: 1,
-                command: Command::Stop,
-            }),
+    commands
+        .submit(
+            &format!("00000000-0000-4000-8000-{stopped:012}"),
+            stopped,
+            &json!({"kind": "stop"}),
         )
         .unwrap();
+    tl3_controller::ingress::drain(&mut controller).unwrap();
     while !controller.world().unwrap().nodes[stopped as usize]
         .phase
         .is_closed()

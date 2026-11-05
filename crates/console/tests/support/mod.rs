@@ -1,10 +1,10 @@
-// Copied from RobTand/trustladderiii crates/store/tests/support/mod.rs at 2220efd9e9e302774b986c69736cdbe338b7c1cc.
+// Copied from RobTand/trustladderiii crates/store/tests/support/mod.rs at cdacce8f99c28ca8dba8f5f76831b77b4dfcd836.
 use postgresql_embedded::{PostgreSQL, Settings, VersionReq};
 use std::{
     collections::HashMap,
     fs,
     path::PathBuf,
-    process::Command,
+    process::{Child, Command, Stdio},
     time::{Duration, Instant},
 };
 use tempfile::TempDir;
@@ -25,6 +25,48 @@ impl Database {
     }
 
     pub fn start_with_fsync(fsync: bool) -> Self {
+        Self::start_with(fsync, 20, false)
+    }
+
+    /// One server for a whole test process (#731). Rust never drops a static, so
+    /// a watchdog stops Postgres and removes its scratch when this process exits
+    /// and the kernel closes the watchdog's stdin. Keep the returned child; never
+    /// write to its stdin or wait for it.
+    #[allow(
+        dead_code,
+        reason = "Used by the controller library's shared fixture; this fixture is shared with store tests"
+    )]
+    pub fn start_shared() -> (Self, Child) {
+        Self::start_shared_with(false)
+    }
+
+    /// Adapter crash children reserve stdout for their handshake (#785).
+    #[allow(dead_code, reason = "Used by standalone controller adapter fixtures")]
+    pub fn start_shared_on_stderr() -> (Self, Child) {
+        Self::start_shared_with(true)
+    }
+
+    fn start_shared_with(stderr: bool) -> (Self, Child) {
+        // Parallel `cargo test` threads share this server, and each test opens several sessions.
+        let database = Self::start_with(true, 200, stderr);
+        let settings = database.postgres.settings();
+        let watchdog = Command::new("sh")
+            .args([
+                "-c",
+                r#"cat >/dev/null; "$0" stop -D "$1" -m immediate -s; rm -rf "$2""#,
+            ])
+            .arg(settings.binary_dir().join("pg_ctl"))
+            .arg(&settings.data_dir)
+            .arg(database.scratch.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start the shared Postgres watchdog");
+        (database, watchdog)
+    }
+
+    fn start_with(fsync: bool, max_connections: u32, stderr: bool) -> Self {
         scratch::reap(&std::env::temp_dir());
         let scratch = tempfile::Builder::new()
             .prefix("tl3-store-pg-")
@@ -57,7 +99,7 @@ impl Database {
             socket_dir: None,
             timeout: Some(Duration::from_secs(90)),
             configuration: HashMap::from([
-                ("max_connections".into(), "20".into()),
+                ("max_connections".into(), max_connections.to_string()),
                 ("shared_buffers".into(), "16MB".into()),
                 ("max_parallel_workers".into(), "0".into()),
                 ("max_worker_processes".into(), "0".into()),
@@ -77,10 +119,15 @@ impl Database {
         runtime
             .block_on(postgres.setup())
             .expect("download and initialize embedded Postgres");
-        println!(
+        let diagnostic = format!(
             "embedded Postgres cached setup (fsync={fsync}): {:.2}s",
             started.elapsed().as_secs_f64()
         );
+        if stderr {
+            eprintln!("{diagnostic}");
+        } else {
+            println!("{diagnostic}");
+        }
         runtime
             .block_on(postgres.start())
             .expect("start embedded Postgres");
@@ -100,6 +147,19 @@ impl Database {
     }
 
     pub fn create(&mut self, name: &str) -> tl3_config::Store {
+        let settings = self.create_uninitialized(name);
+        let mut ownership =
+            tl3_store::Ownership::claim(tl3_store::Store::connect(&settings).unwrap()).unwrap();
+        ownership.migrate().unwrap();
+        ownership.release().unwrap();
+        settings
+    }
+
+    #[allow(
+        dead_code,
+        reason = "Schema and migration regressions need an empty database"
+    )]
+    pub fn create_uninitialized(&mut self, name: &str) -> tl3_config::Store {
         self.runtime
             .block_on(self.postgres.create_database(name))
             .unwrap();

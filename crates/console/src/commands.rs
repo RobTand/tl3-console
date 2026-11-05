@@ -207,6 +207,17 @@ async fn file(
     let filed = tokio::task::spawn_blocking(move || filer.submit(&request.id, node, &action)).await;
     match filed {
         Ok(Ok(filed)) => (StatusCode::ACCEPTED, Json(Filed { id, filed })).into_response(),
+        Ok(Err(tl3_store::Error::SchemaVersion { actual, expected })) => {
+            eprintln!("console command {id} not filed: store schema {actual}, expected {expected}");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!(
+                    "Command not filed: store schema {actual}, but the console requires {expected}. \
+                     Update the console before sending commands.\n"
+                ),
+            )
+                .into_response()
+        }
         Ok(Err(error)) => match sqlstate(&error) {
             // tl3_console_command's own caps (TL3 migration 11).
             Some("22001") => refused(

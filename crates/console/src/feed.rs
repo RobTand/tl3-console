@@ -3,6 +3,7 @@
 //! stale, since changes may have committed while it was away. Sessions that
 //! drop soon after opening keep backing off.
 
+use crate::schema::Listener;
 use crate::{
     describe,
     rebuild::{Change, Rebuilds},
@@ -16,7 +17,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tl3_store::Listener;
 
 /// Reconnect delays: doubling from the first, never above the cap.
 pub(crate) struct Backoff {

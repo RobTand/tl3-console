@@ -105,6 +105,7 @@ fn bootstrap() -> Bootstrap {
         rob: 24923402,
         slots: 1,
         pool: 1,
+        fail_fast: false,
     }
 }
 
@@ -675,7 +676,7 @@ fn refuses_hosts_the_console_does_not_serve(settings: &tl3_config::Store, assets
 /// A console started before tl3d migrates the store builds the board once the
 /// schema matches, without waiting for a controller commit.
 fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
-    let settings = database.create("console_unmigrated");
+    let settings = database.create_uninitialized("console_unmigrated");
     let console = tl3_console::start(
         TcpListener::bind("127.0.0.1:0").unwrap(),
         tl3_console::Options {
@@ -689,7 +690,9 @@ fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
     )
     .unwrap();
     let mut stream = EventStream::open_with_guard(console.address(), None, Duration::from_secs(20));
-    drop(Store::open(&settings).unwrap());
+    let mut ownership = tl3_store::Ownership::claim(Store::connect(&settings).unwrap()).unwrap();
+    ownership.migrate().unwrap();
+    ownership.release().unwrap();
     let event = stream.board_event();
     assert_eq!(event.name, "snapshot");
     assert_eq!(event.data["revision"], 0);
@@ -765,7 +768,10 @@ fn pinned_migrations_match_the_pinned_tl3(database: &mut Database) {
 /// the board keep working, and the log says which versions are extra.
 fn accepts_a_newer_schema_with_a_warning(database: &mut Database, assets: &Path) {
     let settings = database.create("console_newer_schema");
-    drop(Store::open(&settings).unwrap());
+    let records = tempfile::tempdir().unwrap();
+    let mut controller = open(&settings, records.path());
+    controller.intake(issue(42)).unwrap();
+    drop(controller);
     let next = pinned_version(&settings) + 1;
     add_migration(&settings, next);
     add_migration(&settings, next + 1);
@@ -781,6 +787,29 @@ fn accepts_a_newer_schema_with_a_warning(database: &mut Database, assets: &Path)
     let mut stream = EventStream::open_with_guard(console.address(), None, Duration::from_secs(20));
     assert_eq!(stream.board_event().name, "snapshot");
     assert_eq!(get(console.address(), "/api/board").0, 200);
+    // Drain startup events before checking that a refused command emits none.
+    while stream.event().name != "postmortems" {}
+    let address = console.address();
+    let id = "00000000-0000-4000-8000-000000000042";
+    let headers = format!("X-TL3-Console: 1\r\nOrigin: http://{address}\r\n");
+    let body = format!(r#"{{"id":"{id}","action":{{"kind":"pause"}}}}"#);
+    let (status, reply) = post(address, "/api/requests/0/commands", &headers, &body);
+    assert_eq!(status, 503);
+    let reply = String::from_utf8(reply).unwrap();
+    assert!(
+        reply.contains("schema") && reply.contains("not filed"),
+        "{reply}"
+    );
+    assert!(!filed(&settings, id));
+    // A feed barrier after the refused POST: any commands event would precede it.
+    raw(&settings)
+        .batch_execute("NOTIFY tl3_changes, 'tl3_postmortems'")
+        .unwrap();
+    assert_eq!(
+        stream.event().name,
+        "postmortems",
+        "no commands event was emitted"
+    );
 }
 
 /// A store behind the pinned TL3 lacks tables the board reads.
@@ -1977,7 +2006,13 @@ fn postmortem_scenarios() {
                 );
                 // This command is a barrier after the world patch. A spurious
                 // postmortem event from that commit would arrive before it.
-                assert_eq!(stream.event().name, "commands");
+                loop {
+                    let event = stream.event();
+                    if event.name == "commands" {
+                        break;
+                    }
+                    assert_eq!(event.name, "patch", "unexpected invalidation: {event:?}");
+                }
             }),
         ),
         (
