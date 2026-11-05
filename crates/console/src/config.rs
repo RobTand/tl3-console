@@ -372,7 +372,7 @@ mod tests {
         for store in [None, Some(toml::Value::String("wrong".into()))] {
             value.as_table_mut().unwrap().remove("store");
             if let Some(store) = store {
-                value["store"] = store;
+                value.as_table_mut().unwrap().insert("store".into(), store);
             }
             let error = Settings::parse(&console(&[]), &toml::to_string(&value).unwrap())
                 .unwrap_err()
@@ -396,7 +396,10 @@ mod tests {
                 let mut value = original.clone();
                 value.as_table_mut().unwrap().remove(section);
                 if let Some(replacement) = replacement {
-                    value[section] = replacement;
+                    value
+                        .as_table_mut()
+                        .unwrap()
+                        .insert(section.into(), replacement);
                 }
                 let error = Settings::parse(&console(&[]), &toml::to_string(&value).unwrap())
                     .unwrap_err()
