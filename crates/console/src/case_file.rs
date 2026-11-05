@@ -382,6 +382,7 @@ impl Stored {
             phase_since_ms: change.get(0),
             progress,
             worker_failure,
+            budget_exhaustion: None,
             incidents: open,
             // The worker adapter reads the same session for this attempt.
             maker_model: (session["attempt"] == node.attempt
@@ -660,6 +661,9 @@ fn cause(event_key: &str, result: &Value, effects: &[Effect]) -> String {
             Fact::IncidentCleared { by_rob: true } => "Rob cleared the incident",
             Fact::IncidentCleared { by_rob: false } => "A probe cleared the incident",
             Fact::UpstreamStalled => "An outside service stopped making progress",
+            Fact::DependencyRemove { .. } => "A prerequisite was removed",
+            Fact::Dependency { .. } => "A prerequisite changed",
+            Fact::Priority(_) => "The request priority changed",
         }
         .into(),
         Event::Command { command, .. } => match command {
@@ -1346,6 +1350,7 @@ mod tests {
             phase_since_ms: None,
             progress: None,
             worker_failure: None,
+            budget_exhaustion: None,
             incidents: Vec::new(),
             maker_model: None,
             question_context: None,

@@ -143,6 +143,7 @@ fn open(settings: &tl3_config::Store, records: &Path, script: &Rc<RefCell<Script
             rob: 24923402,
             slots: 2,
             pool: 2,
+            fail_fast: false,
         },
     )
     .unwrap();

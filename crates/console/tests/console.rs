@@ -105,6 +105,7 @@ fn bootstrap() -> Bootstrap {
         rob: 24923402,
         slots: 1,
         pool: 1,
+        fail_fast: false,
     }
 }
 
@@ -675,7 +676,7 @@ fn refuses_hosts_the_console_does_not_serve(settings: &tl3_config::Store, assets
 /// A console started before tl3d migrates the store builds the board once the
 /// schema matches, without waiting for a controller commit.
 fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
-    let settings = database.create("console_unmigrated");
+    let settings = database.create_uninitialized("console_unmigrated");
     let console = tl3_console::start(
         TcpListener::bind("127.0.0.1:0").unwrap(),
         tl3_console::Options {
@@ -689,7 +690,9 @@ fn builds_once_the_store_is_migrated(database: &mut Database, assets: &Path) {
     )
     .unwrap();
     let mut stream = EventStream::open_with_guard(console.address(), None, Duration::from_secs(20));
-    drop(Store::open(&settings).unwrap());
+    let mut ownership = tl3_store::Ownership::claim(Store::connect(&settings).unwrap()).unwrap();
+    ownership.migrate().unwrap();
+    ownership.release().unwrap();
     let event = stream.board_event();
     assert_eq!(event.name, "snapshot");
     assert_eq!(event.data["revision"], 0);

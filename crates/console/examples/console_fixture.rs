@@ -174,6 +174,7 @@ fn main() {
             rob: 24923402,
             slots: 2,
             pool: 2,
+            fail_fast: false,
         },
     )
     .unwrap();
