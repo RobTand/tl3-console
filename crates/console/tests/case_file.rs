@@ -42,7 +42,8 @@ fn main() {
     );
     let assets = tempfile::tempdir().unwrap();
     std::fs::write(assets.path().join("index.html"), "<!doctype html>").unwrap();
-    let config = tl3_config::Config::parse(include_str!("fixtures/tl3-example.toml")).unwrap();
+    let config =
+        tl3_console::config::Tl3::parse(include_str!("fixtures/tl3-example.toml")).unwrap();
     let console = tl3_console::start(
         TcpListener::bind("127.0.0.1:0").unwrap(),
         tl3_console::Options {
@@ -115,8 +116,9 @@ fn main() {
     println!("7 case file scenarios passed; no skips");
 }
 
-fn repository() -> tl3_config::Repository {
-    let config = tl3_config::Config::parse(include_str!("fixtures/tl3-example.toml")).unwrap();
+fn repository() -> tl3_console::config::Repository {
+    let config =
+        tl3_console::config::Tl3::parse(include_str!("fixtures/tl3-example.toml")).unwrap();
     config.github.repos[0].clone()
 }
 

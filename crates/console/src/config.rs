@@ -11,8 +11,11 @@
 //! hide_repos = ["RobTand/tl3-sandbox"]
 //! ```
 //!
-//! The console reads `tl3.toml` with the pinned TL3's own parser, and keeps
-//! only its store settings and model ladders. It connects as its own login.
+//! The console reads only its view of TL3 config, tolerates additional keys,
+//! and connects as its own login.
+
+mod tl3;
+pub use tl3::{Repository, Tl3};
 
 use serde::Deserialize;
 use std::{
@@ -72,15 +75,11 @@ impl Settings {
     /// The same, from text, without touching the password file.
     pub fn parse(console: &str, tl3: &str) -> crate::Result<Self> {
         let file = File::parse(console)?;
-        let tl3 = tl3_config::Config::parse(tl3).map_err(|error| invalid("tl3_config", error))?;
+        let tl3 = Tl3::parse(tl3)?;
         Ok(Self {
             listen: file.listen,
             assets: file.assets,
-            store: tl3_config::Store {
-                user: file.user,
-                password_file: Some(file.password_file),
-                ..tl3.store
-            },
+            store: tl3.store(file.user, file.password_file)?,
             links: crate::case_file::Links::new(file.traces.as_deref(), &tl3.github.repos)?,
             models: tl3.models,
             public_hosts: file.public_hosts,
@@ -289,7 +288,21 @@ mod tests {
             ),
             (tl3.store.host, tl3.store.port, tl3.store.database)
         );
-        assert_eq!(settings.models.maker[0].name, tl3.models.maker[0].name);
+        assert_eq!(
+            format!("{:?}", settings.models),
+            format!("{:?}", tl3.models)
+        );
+        assert_eq!(
+            settings.links.branches,
+            tl3.github
+                .repos
+                .iter()
+                .map(|repo| (
+                    format!("{}/{}", repo.owner, repo.name).to_ascii_lowercase(),
+                    repo.branch_template.clone(),
+                ))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -376,7 +389,51 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_tl3_config_its_tl3_cannot_parse() {
+    fn refuses_malformed_used_tl3_sections_and_values() {
+        let original: toml::Value = toml::from_str(TL3).unwrap();
+        for section in ["store", "models", "github"] {
+            for replacement in [None, Some(toml::Value::Integer(7))] {
+                let mut value = original.clone();
+                value.as_table_mut().unwrap().remove(section);
+                if let Some(replacement) = replacement {
+                    value[section] = replacement;
+                }
+                let error = Settings::parse(&console(&[]), &toml::to_string(&value).unwrap())
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains(section), "{section}: {error}");
+            }
+        }
+        for (key, replacement) in [
+            ("host", toml::Value::String("remote.example.test".into())),
+            ("port", toml::Value::Integer(0)),
+            ("database", toml::Value::String(String::new())),
+            ("connect_timeout_secs", toml::Value::Integer(0)),
+        ] {
+            let mut value = original.clone();
+            value["store"][key] = replacement;
+            let error = Settings::parse(&console(&[]), &toml::to_string(&value).unwrap())
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("store"), "{key}: {error}");
+        }
+        for (section, key) in [
+            ("store", "database"),
+            ("models", "maker"),
+            ("github", "repos"),
+        ] {
+            let mut value = original.clone();
+            value[section].as_table_mut().unwrap().remove(key);
+            let error = Settings::parse(&console(&[]), &toml::to_string(&value).unwrap())
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(section), "{section}.{key}: {error}");
+            assert!(error.contains(key), "{section}.{key}: {error}");
+        }
+    }
+
+    #[test]
+    fn refuses_an_invalid_tl3_store() {
         let error = Settings::parse(&console(&[]), "[store]\nport = \"x\"\n")
             .unwrap_err()
             .to_string();
