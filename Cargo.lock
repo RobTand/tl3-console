@@ -436,6 +436,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
+name = "dyn-clone"
+version = "1.0.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
+
+[[package]]
 name = "either"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2175,6 +2181,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "schemars"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab508826f74a77ca9d5aba6ff19b522583ee3eaf28a19384ff3d0e5835fadf6e"
+dependencies = [
+ "dyn-clone",
+ "ref-cast",
+ "schemars_derive",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "schemars_derive"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1c3a92094fa7d61aa124645844facb6b554dfc797136d0f5fd1f890e2bffc69"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_derive_internals",
+ "syn 3.0.9",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2233,6 +2264,17 @@ name = "serde_derive"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
+]
+
+[[package]]
+name = "serde_derive_internals"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f852137cce035d6a4df67ccce505ff6b3e9fd3a10e3e52b24dc71e650bb1a9bd"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2689,7 +2731,7 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 [[package]]
 name = "tl3-config"
 version = "0.1.0"
-source = "git+https://github.com/RobTand/trustladderiii?rev=2220efd9e9e302774b986c69736cdbe338b7c1cc#2220efd9e9e302774b986c69736cdbe338b7c1cc"
+source = "git+https://github.com/RobTand/trustladderiii?rev=cdacce8f99c28ca8dba8f5f76831b77b4dfcd836#cdacce8f99c28ca8dba8f5f76831b77b4dfcd836"
 dependencies = [
  "glob",
  "serde",
@@ -2725,13 +2767,17 @@ dependencies = [
 [[package]]
 name = "tl3-controller"
 version = "0.1.0"
-source = "git+https://github.com/RobTand/trustladderiii?rev=2220efd9e9e302774b986c69736cdbe338b7c1cc#2220efd9e9e302774b986c69736cdbe338b7c1cc"
+source = "git+https://github.com/RobTand/trustladderiii?rev=cdacce8f99c28ca8dba8f5f76831b77b4dfcd836#cdacce8f99c28ca8dba8f5f76831b77b4dfcd836"
 dependencies = [
  "chrono",
+ "fancy-regex",
  "jsonschema",
+ "libc",
  "regex",
+ "regex-syntax",
  "reqwest 0.12.28",
  "rustix",
+ "schemars",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2751,7 +2797,7 @@ dependencies = [
 [[package]]
 name = "tl3-github"
 version = "0.1.0"
-source = "git+https://github.com/RobTand/trustladderiii?rev=2220efd9e9e302774b986c69736cdbe338b7c1cc#2220efd9e9e302774b986c69736cdbe338b7c1cc"
+source = "git+https://github.com/RobTand/trustladderiii?rev=cdacce8f99c28ca8dba8f5f76831b77b4dfcd836#cdacce8f99c28ca8dba8f5f76831b77b4dfcd836"
 dependencies = [
  "chrono",
  "hex",
@@ -2771,7 +2817,7 @@ dependencies = [
 [[package]]
 name = "tl3-kernel"
 version = "0.1.0"
-source = "git+https://github.com/RobTand/trustladderiii?rev=2220efd9e9e302774b986c69736cdbe338b7c1cc#2220efd9e9e302774b986c69736cdbe338b7c1cc"
+source = "git+https://github.com/RobTand/trustladderiii?rev=cdacce8f99c28ca8dba8f5f76831b77b4dfcd836#cdacce8f99c28ca8dba8f5f76831b77b4dfcd836"
 dependencies = [
  "serde",
 ]
@@ -2779,7 +2825,7 @@ dependencies = [
 [[package]]
 name = "tl3-mergify"
 version = "0.1.0"
-source = "git+https://github.com/RobTand/trustladderiii?rev=2220efd9e9e302774b986c69736cdbe338b7c1cc#2220efd9e9e302774b986c69736cdbe338b7c1cc"
+source = "git+https://github.com/RobTand/trustladderiii?rev=cdacce8f99c28ca8dba8f5f76831b77b4dfcd836#cdacce8f99c28ca8dba8f5f76831b77b4dfcd836"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -2791,7 +2837,7 @@ dependencies = [
 [[package]]
 name = "tl3-prismabuild"
 version = "0.1.0"
-source = "git+https://github.com/RobTand/trustladderiii?rev=2220efd9e9e302774b986c69736cdbe338b7c1cc#2220efd9e9e302774b986c69736cdbe338b7c1cc"
+source = "git+https://github.com/RobTand/trustladderiii?rev=cdacce8f99c28ca8dba8f5f76831b77b4dfcd836#cdacce8f99c28ca8dba8f5f76831b77b4dfcd836"
 dependencies = [
  "reqwest 0.12.28",
  "rustix",
@@ -2804,7 +2850,7 @@ dependencies = [
 [[package]]
 name = "tl3-store"
 version = "0.1.0"
-source = "git+https://github.com/RobTand/trustladderiii?rev=2220efd9e9e302774b986c69736cdbe338b7c1cc#2220efd9e9e302774b986c69736cdbe338b7c1cc"
+source = "git+https://github.com/RobTand/trustladderiii?rev=cdacce8f99c28ca8dba8f5f76831b77b4dfcd836#cdacce8f99c28ca8dba8f5f76831b77b4dfcd836"
 dependencies = [
  "postgres",
  "serde",
@@ -2817,7 +2863,7 @@ dependencies = [
 [[package]]
 name = "tl3-worktrees"
 version = "0.1.0"
-source = "git+https://github.com/RobTand/trustladderiii?rev=2220efd9e9e302774b986c69736cdbe338b7c1cc#2220efd9e9e302774b986c69736cdbe338b7c1cc"
+source = "git+https://github.com/RobTand/trustladderiii?rev=cdacce8f99c28ca8dba8f5f76831b77b4dfcd836#cdacce8f99c28ca8dba8f5f76831b77b4dfcd836"
 dependencies = [
  "base64 0.22.1",
  "serde",

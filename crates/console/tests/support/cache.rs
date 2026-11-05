@@ -1,4 +1,4 @@
-// Copied from RobTand/trustladderiii crates/store/tests/support/cache.rs at 2220efd9e9e302774b986c69736cdbe338b7c1cc.
+// Copied from RobTand/trustladderiii crates/store/tests/support/cache.rs at cdacce8f99c28ca8dba8f5f76831b77b4dfcd836.
 use super::scratch::owned_metadata;
 use postgresql_embedded::{PostgreSQL, Settings};
 use std::{
@@ -72,9 +72,7 @@ impl Drop for InstallLock {
 }
 
 pub fn directory() -> PathBuf {
-    // Not in TL3's copy: under Bazel the cache lives in the test's own scratch.
-    let home = std::env::var_os("TEST_TMPDIR")
-        .or_else(|| std::env::var_os("XDG_CACHE_HOME"))
+    let home = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
         .unwrap_or_else(|| {
@@ -110,18 +108,8 @@ pub fn install(settings: &Settings, runtime: &tokio::runtime::Runtime) {
         return;
     }
     fs::DirBuilder::new().mode(0o700).create(&staging).unwrap();
-    // Not in TL3's copy: Bazel names the archive's bin/postgres, a runfiles path.
-    let bazel = std::env::var_os("TL3_TEST_POSTGRES_BIN").map(|binary| {
-        PathBuf::from(binary)
-            .ancestors()
-            .nth(2)
-            .unwrap()
-            .to_path_buf()
-    });
-    if let Some(source) = std::env::var_os("TL3_TEST_POSTGRES_DIR")
-        .map(PathBuf::from)
-        .or(bazel)
-    {
+    if let Some(source) = std::env::var_os("TL3_TEST_POSTGRES_DIR") {
+        let source = PathBuf::from(source);
         assert!(source.join("bin/postgres").is_file());
         copy_tree(&source, &staging.join("binaries"));
         fs::rename(staging.join("binaries"), &settings.installation_dir).unwrap();

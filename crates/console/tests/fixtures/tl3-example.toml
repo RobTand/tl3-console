@@ -1,4 +1,4 @@
-# Copied from RobTand/trustladderiii crates/config/example.toml at 2220efd9e9e302774b986c69736cdbe338b7c1cc.
+# Copied from RobTand/trustladderiii crates/config/example.toml at cdacce8f99c28ca8dba8f5f76831b77b4dfcd836.
 # Slice-one config. Paths are absolute; neither ~ nor environment variables expand.
 # Deployment placeholders parse offline. Replace them before Config::load.
 # docs/state-table.md, "Stopping": worktree lifecycle. Deployment starting path.
@@ -9,6 +9,8 @@ worktrees_root = "/srv/tl3/worktrees"
 # owner = "RobTand"
 # repo = "trustladderiii"
 # issue = 123
+# Exact whole lines from Rob's account. Omit or [] to disable delegated attribution.
+# delegated_attributions = ["(Posted by the TL3 build coordinator under Rob's standing approval.)"]
 
 [store]
 host = "127.0.0.1"
@@ -33,6 +35,11 @@ free_rechecks = 3
 w = 1
 # Q39, docs/state-machine.md: simultaneous agent runs.
 agent_pool = 1
+# Q54, docs/state-machine.md: stop for TL3 review instead of retrying the work.
+fail_fast = false
+# #642: postmortems have a separate two-slot lane with no daily limit.
+# #486: each run's wall-clock deadline in seconds; this is the default.
+# postmortem_deadline_secs = 1200
 
 [github]
 # deploy/github-app/README.md: existing JSON with id, slug, pem, webhook_secret.
@@ -56,8 +63,19 @@ installation_id = 1
 # base_branch = "main"
 # Optional additions to the mandatory defaults and global planning.protected_paths.
 # protected_paths = ["CHANGELOG.md", "release/**"]
+# Generated outputs cost a 1,024-token fit allowance; standard leading headers are also detected.
+# Optional admitted generator; outputs still require footprint and protected-path checks.
+# generated_files = ["**/BUILD.bazel"]
+# generator = "bash tools/bazel/generate.sh"
+# Optional startup plus command deadline, 1–600 seconds; unset keeps 120.
+# generator_timeout_s = 300
 # Optional: also run up to this many existing tests that import the change as a regression check.
 # selected_tests = 200
+# Optional repo-wide rules, run as regression checks on every leaf and round.
+# always_tests = ["tests/test_rules.py"]
+# Optional CPU-only PB reservation for Checking and maker run_tests. Default: 1 CPU, 2 GiB.
+# Integers only: cpus 1..16, mem_gb 1..64. No GPU field.
+# test_demand = { cpus = 4, mem_gb = 12 }
 # PrismaBuild: branch_template = "prismabuild-{issue}-tl3-{node}"
 
 [models]
@@ -108,7 +126,7 @@ container_image = "sha256:000000000000000000000000000000000000000000000000000000
 
 [hindsight]
 # Set a private, owner-only file containing the raw API key when authentication is enabled.
-# The controller reads it only during background memory delivery.
+# The controller reads it for memory delivery and for recall before worker runs.
 # api_key_file = "/run/tl3/hindsight-key"
 # Hindsight listens locally on dl380g10 at 8890; 8888 is celestia's tunnel.
 endpoint = "http://127.0.0.1:8890"
@@ -159,6 +177,11 @@ command = ["-m", "tl3_workers", "run"]
 # launcher = ["/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect", "--slice=tl3-workers.slice"]
 
 [planning]
+# Evidence capabilities of the installed tool. Omit for these defaults, or use
+# tool_capabilities = [] to disable execution evidence. Entries may narrow these
+# lists. A different executor needs an implemented adapter before configuration.
+tool_capabilities = [{ tool = "run_tests", executor = "prismabuild_pytest", runner_features = ["base_head", "repeat", "parallel", "always_tests", "native_threads_1"], artifacts = ["action_key", "cas_receipt", "sha", "logs", "terminal_verdict"], methods = ["red_green", "declared_symptom", "head", "base_head", "subject_observer",  "forced_reproduction.environment", "forced_reproduction.patches"], protected_files = [] }]
+
 # Additions to the built-in defaults, which always apply and needn't be listed (#388).
 protected_paths = [".github/**", ".mergify.yml", ".mergify.yaml", "**/conftest.py", "pytest.ini", ".pytest.ini", "tox.ini", "noxfile.py", "setup.cfg", "pyproject.toml"]
 
