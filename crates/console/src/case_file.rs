@@ -648,6 +648,9 @@ fn cause(event_key: &str, result: &Value, effects: &[Effect]) -> String {
                 Ack::Confirmed => format!("{step} finished"),
                 Ack::Retryable => format!("{step} will be retried"),
                 Ack::Permanent => format!("{step} failed"),
+                Ack::BodyPolicyRefused => {
+                    format!("{step} was refused by the publication body policy")
+                }
             }
         }
         Event::Fact { fact, .. } => match fact {
