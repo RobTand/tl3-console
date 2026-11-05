@@ -326,6 +326,34 @@ mod tests {
     }
 
     #[test]
+    fn tolerates_unknown_keys_inside_used_tl3_sections() {
+        let original: toml::Value = toml::from_str(TL3).unwrap();
+        let expected = Settings::parse(&console(&[]), TL3).unwrap();
+        for section in ["store", "models", "github", "repository", "model"] {
+            let mut value = original.clone();
+            let table = match section {
+                "repository" => value["github"]["repos"][0].as_table_mut().unwrap(),
+                "model" => value["models"]["maker"][0].as_table_mut().unwrap(),
+                name => value[name].as_table_mut().unwrap(),
+            };
+            table.insert("future_option".into(), toml::Value::Boolean(true));
+            let actual = Settings::parse(&console(&[]), &toml::to_string(&value).unwrap())
+                .unwrap_or_else(|error| panic!("{section}: {error}"));
+            assert_eq!(format!("{actual:?}"), format!("{expected:?}"), "{section}");
+        }
+    }
+
+    #[test]
+    fn needs_only_the_tl3_sections_the_console_uses() {
+        let mut value: toml::Value = toml::from_str(TL3).unwrap();
+        value
+            .as_table_mut()
+            .unwrap()
+            .retain(|key, _| matches!(key.as_str(), "store" | "models" | "github"));
+        Settings::parse(&console(&[]), &toml::to_string(&value).unwrap()).unwrap();
+    }
+
+    #[test]
     fn refuses_missing_or_malformed_tl3_store() {
         let mut value: toml::Value = toml::from_str(TL3).unwrap();
         for store in [None, Some(toml::Value::String("wrong".into()))] {
