@@ -95,6 +95,7 @@ fn main() {
             &json!({"kind": "stop"}),
         )
         .unwrap();
+    tl3_controller::ingress::drain(&mut controller).unwrap();
     drive(&mut controller, AWAITING_ROB, |n| n.phase.is_closed());
     stopped_request(&files);
     println!("test stopped_request ... ok");

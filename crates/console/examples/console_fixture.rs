@@ -214,6 +214,7 @@ fn main() {
                 &json!({"kind": kind}),
             )
             .unwrap();
+        tl3_controller::ingress::drain(&mut controller).unwrap();
         controller.drive_once().unwrap();
     }
     controller
@@ -260,6 +261,7 @@ fn main() {
             &json!({"kind": "stop"}),
         )
         .unwrap();
+    tl3_controller::ingress::drain(&mut controller).unwrap();
     while !controller.world().unwrap().nodes[stopped as usize]
         .phase
         .is_closed()
