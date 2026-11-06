@@ -31,7 +31,7 @@ register_toolchains("@pythons_hub//:all")
 
 # TL3's crates come from Cargo.lock's git source, pinned once in Cargo.toml's
 # [workspace.dependencies]. @tl3 is the same commit's full tree, read from
-# Cargo.lock, for the one build script that reads outside its crate.
+# Cargo.lock, for code that reads outside its crate.
 tl3_source = use_repo_rule("//tools/bazel:tl3_source.bzl", "tl3_source")
 tl3_source(
     name = "tl3",
@@ -61,6 +61,11 @@ crate.annotation(
     crate = "tl3-controller",
     override_target_build_script = "@@+tl3_source+tl3//crates/controller:build_script",
     compile_data = ["@@+tl3_source+tl3//crates/controller:schemas"],
+)
+# Its verification macros live in the sibling GitHub crate in the deployed tree.
+crate.annotation(
+    crate = "tl3-mergify",
+    override_target_lib = "@@+tl3_source+tl3//crates/mergify:tl3_mergify",
 )
 use_repo(crate, "crates")
 

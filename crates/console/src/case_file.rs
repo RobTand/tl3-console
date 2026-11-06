@@ -374,6 +374,9 @@ impl Stored {
                 .to_owned()
         };
         let request = Request {
+            direct_delivery: false,
+            quota_hold: None,
+            prerequisites: Vec::new(),
             id: NodeId(id),
             repo: format!("{}/{}", field("owner"), field("name")),
             issue: binding["issue"].as_u64().unwrap_or_default(),
@@ -691,6 +694,8 @@ fn reply_cause(reply: Reply) -> &'static str {
         Reply::AuditDisagrees => "The auditor disagreed",
         Reply::PlanLeaf { .. } => "The planner returned a plan",
         Reply::PlanSplit => "The planner proposed a split",
+        Reply::PlanCheckRejected => "The plan check rejected the plan",
+        Reply::PlanCheckNeedsSplit => "The plan check requires a split",
         Reply::PlanCantMeet => "The planner couldn't meet the request",
         Reply::ProtectedPaths => "The request touches protected paths",
         Reply::MakerDone { .. } => "The maker made a change",
@@ -908,6 +913,8 @@ fn reply_outcome_of(reply: Reply) -> &'static str {
         Reply::AuditDisagrees => "Disagreed",
         Reply::PlanLeaf { .. } => "Returned a plan",
         Reply::PlanSplit => "Proposed a split",
+        Reply::PlanCheckRejected => "Plan rejected",
+        Reply::PlanCheckNeedsSplit => "Split required",
         Reply::PlanCantMeet | Reply::MakerCantMeet => "Can't meet the request",
         Reply::ProtectedPaths => "Touches protected paths",
         Reply::MakerDone { .. } => "Made a change",
@@ -1344,6 +1351,9 @@ mod tests {
             clarified: false,
         });
         let request = Request {
+            direct_delivery: false,
+            quota_hold: None,
+            prerequisites: Vec::new(),
             id: NodeId(0),
             node,
             repo: "RobTand/tl3-sandbox".into(),

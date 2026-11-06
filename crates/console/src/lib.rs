@@ -107,8 +107,14 @@ pub(crate) struct Published {
 /// Open one read-only session the way the board does. Fails when the store's
 /// schema is older than the pinned TL3 commit's or disagrees with it. Returns
 /// the migration versions the store has beyond the pin, none when it matches.
+/// Also reads the board projection so deploy refuses undecodable stored state.
 pub fn check(store: &tl3_config::Store) -> Result<Vec<i32>> {
-    Ok(Session::open(store, "check")?.extra().to_vec())
+    let mut session = Session::open(store, "check")?;
+    let extra = session.extra().to_vec();
+    let mut tx = session.transaction()?;
+    tl3_controller::board::read(&mut tx, now_ms(), None)?;
+    tx.commit().map_err(tl3_store::Error::from)?;
+    Ok(extra)
 }
 
 /// Serve on an already bound listener. The board, its change feed and the

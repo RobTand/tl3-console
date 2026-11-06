@@ -80,7 +80,8 @@ Some details:
 - crate_universe builds TL3's crates from Cargo.lock's git source.
   `tl3-controller`'s build script reads TL3's `workers/` schemas, which sit
   outside the crate, so it runs from `@tl3`: TL3's full tree at the same
-  commit (`tools/bazel/tl3_source.bzl`).
+  commit (`tools/bazel/tl3_source.bzl`). `tl3-mergify` also builds from that
+  tree because it includes verification macros from its sibling GitHub crate.
 
 ## CI and merging
 
@@ -116,7 +117,9 @@ dl380g10:
    TL3's `tl3.toml`. It never overwrites that file afterwards.
 3. It runs the new binary's `check` against the live store, which fails when
    the store's schema is older than the pinned TL3's or disagrees with it. A
-   store that is ahead passes with a warning.
+   store that is ahead passes with a warning. The check also reads the board
+   projection and refuses stored values the pinned TL3 cannot decode, before
+   switching the release or restarting the console.
 4. It installs the release under `~/.local/share/tl3-console/releases/`, points
    `~/.local/share/tl3-console/current` at it, installs
    `deploy/tl3-console.service`, and restarts only `tl3-console.service`.
