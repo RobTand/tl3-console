@@ -11,8 +11,11 @@
 //! hide_repos = ["RobTand/tl3-sandbox"]
 //! ```
 //!
-//! The console reads `tl3.toml` with the pinned TL3's own parser, and keeps
-//! only its store settings and model ladders. It connects as its own login.
+//! The console reads only its view of TL3 config, tolerates additional keys,
+//! and connects as its own login.
+
+mod tl3;
+pub use tl3::{Repository, Tl3};
 
 use serde::Deserialize;
 use std::{
@@ -72,15 +75,11 @@ impl Settings {
     /// The same, from text, without touching the password file.
     pub fn parse(console: &str, tl3: &str) -> crate::Result<Self> {
         let file = File::parse(console)?;
-        let tl3 = tl3_config::Config::parse(tl3).map_err(|error| invalid("tl3_config", error))?;
+        let tl3 = Tl3::parse(tl3)?;
         Ok(Self {
             listen: file.listen,
             assets: file.assets,
-            store: tl3_config::Store {
-                user: file.user,
-                password_file: Some(file.password_file),
-                ..tl3.store
-            },
+            store: tl3.store(file.user, file.password_file)?,
             links: crate::case_file::Links::new(file.traces.as_deref(), &tl3.github.repos)?,
             models: tl3.models,
             public_hosts: file.public_hosts,
@@ -289,7 +288,21 @@ mod tests {
             ),
             (tl3.store.host, tl3.store.port, tl3.store.database)
         );
-        assert_eq!(settings.models.maker[0].name, tl3.models.maker[0].name);
+        assert_eq!(
+            format!("{:?}", settings.models),
+            format!("{:?}", tl3.models)
+        );
+        assert_eq!(
+            settings.links.branches,
+            tl3.github
+                .repos
+                .iter()
+                .map(|repo| (
+                    format!("{}/{}", repo.owner, repo.name).to_ascii_lowercase(),
+                    repo.branch_template.clone(),
+                ))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -318,7 +331,357 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_tl3_config_its_tl3_cannot_parse() {
+    fn tolerates_future_tl3_fields_without_changing_used_settings() {
+        let future = include_str!("../tests/fixtures/tl3-future.toml");
+        let expected = Settings::parse(&console(&[]), TL3).unwrap();
+        let actual = Settings::parse(&console(&[]), future).unwrap();
+        assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+    }
+
+    #[test]
+    fn tolerates_unknown_keys_inside_used_tl3_sections() {
+        let original: toml::Value = toml::from_str(TL3).unwrap();
+        let expected = Settings::parse(&console(&[]), TL3).unwrap();
+        for section in ["store", "models", "github", "repository", "model"] {
+            let mut value = original.clone();
+            let table = match section {
+                "repository" => value["github"]["repos"][0].as_table_mut().unwrap(),
+                "model" => value["models"]["maker"][0].as_table_mut().unwrap(),
+                name => value[name].as_table_mut().unwrap(),
+            };
+            table.insert("future_option".into(), toml::Value::Boolean(true));
+            let actual = Settings::parse(&console(&[]), &toml::to_string(&value).unwrap())
+                .unwrap_or_else(|error| panic!("{section}: {error}"));
+            assert_eq!(format!("{actual:?}"), format!("{expected:?}"), "{section}");
+        }
+    }
+
+    #[test]
+    fn needs_only_the_tl3_sections_the_console_uses() {
+        let mut value: toml::Value = toml::from_str(TL3).unwrap();
+        value
+            .as_table_mut()
+            .unwrap()
+            .retain(|key, _| matches!(key, "store" | "models" | "github"));
+        Settings::parse(&console(&[]), &toml::to_string(&value).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn refuses_missing_or_malformed_tl3_store() {
+        let mut value: toml::Value = toml::from_str(TL3).unwrap();
+        for store in [None, Some(toml::Value::String("wrong".into()))] {
+            value.as_table_mut().unwrap().remove("store");
+            if let Some(store) = store {
+                value.as_table_mut().unwrap().insert("store".into(), store);
+            }
+            let error = Settings::parse(&console(&[]), &toml::to_string(&value).unwrap())
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("tl3_config"), "{error}");
+            assert!(error.contains("store"), "{error}");
+        }
+        let malformed = TL3.replace("port = 5432", "port = \"wrong\"");
+        let error = Settings::parse(&console(&[]), &malformed)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("tl3_config"), "{error}");
+        assert!(error.contains("port"), "{error}");
+    }
+
+    #[test]
+    fn refuses_malformed_used_tl3_sections_and_values() {
+        let original: toml::Value = toml::from_str(TL3).unwrap();
+        for section in ["store", "models", "github"] {
+            for replacement in [None, Some(toml::Value::Integer(7))] {
+                let mut value = original.clone();
+                value.as_table_mut().unwrap().remove(section);
+                if let Some(replacement) = replacement {
+                    value
+                        .as_table_mut()
+                        .unwrap()
+                        .insert(section.into(), replacement);
+                }
+                let error = Settings::parse(&console(&[]), &toml::to_string(&value).unwrap())
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains(section), "{section}: {error}");
+            }
+        }
+        for (key, replacement) in [
+            ("host", toml::Value::String("remote.example.test".into())),
+            ("port", toml::Value::Integer(0)),
+            ("database", toml::Value::String(String::new())),
+            ("connect_timeout_secs", toml::Value::Integer(0)),
+        ] {
+            let mut value = original.clone();
+            value["store"][key] = replacement;
+            let error = Settings::parse(&console(&[]), &toml::to_string(&value).unwrap())
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("store"), "{key}: {error}");
+        }
+        for (section, key) in [
+            ("store", "database"),
+            ("models", "maker"),
+            ("github", "repos"),
+        ] {
+            let mut value = original.clone();
+            value[section].as_table_mut().unwrap().remove(key);
+            let error = Settings::parse(&console(&[]), &toml::to_string(&value).unwrap())
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(section), "{section}.{key}: {error}");
+            assert!(error.contains(key), "{section}.{key}: {error}");
+        }
+    }
+
+    #[test]
+    fn unrelated_tl3_validation_does_not_gate_console() {
+        let mut value: toml::Value = toml::from_str(TL3).unwrap();
+        value["limits"] = "future representation".into();
+        value["console"] = false.into();
+        value["store"]["user"] = 7.into();
+        value["github"]["app_credentials_file"] = 7.into();
+        value["github"]["rob"] = false.into();
+        value["github"]["repos"][0]["installation_id"] = 0.into();
+        value["github"]["repos"][0]
+            .as_table_mut()
+            .unwrap()
+            .insert("protected_paths".into(), 7.into());
+        Settings::parse(&console(&[]), &toml::to_string(&value).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn accepts_valid_repository_names_and_custom_templates() {
+        let mut value: toml::Value = toml::from_str(TL3).unwrap();
+        value["github"]["repos"][0]["owner"] = "Rob-Tand".into();
+        value["github"]["repos"][0]["name"] = "tl3.console_example".into();
+        let template = "feature/node-{node}-issue-{issue}";
+        value["github"]["repos"][0]
+            .as_table_mut()
+            .unwrap()
+            .insert("branch_template".into(), template.into());
+        let text = toml::to_string(&value).unwrap();
+        tl3_config::Config::parse(&text).unwrap();
+        let settings = Settings::parse(&console(&[]), &text).unwrap();
+        assert_eq!(
+            settings.links.branches,
+            vec![("rob-tand/tl3.console_example".into(), template.into())]
+        );
+    }
+
+    fn rejects_like_pinned(change: impl FnOnce(&mut toml::Value), field: &str) {
+        let mut value: toml::Value = toml::from_str(TL3).unwrap();
+        change(&mut value);
+        let text = toml::to_string(&value).unwrap();
+        let expected = tl3_config::Config::parse(&text).unwrap_err().to_string();
+        assert!(expected.contains(field), "{expected}");
+        let actual = Settings::parse(&console(&[]), &text)
+            .expect_err("console accepted a value rejected by the pinned parser")
+            .to_string();
+        assert_eq!(actual, format!("tl3_config: {expected}"));
+    }
+
+    #[test]
+    fn rejects_empty_served_repositories() {
+        rejects_like_pinned(
+            |value| value["github"]["repos"] = toml::Value::Array(vec![]),
+            "github.repos",
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_repository_owners() {
+        for owner in [
+            "bad/owner",
+            "bad_owner",
+            "bad.owner",
+            " owner",
+            "owner\n",
+            "",
+            ".",
+            "..",
+        ] {
+            rejects_like_pinned(
+                |value| value["github"]["repos"][0]["owner"] = owner.into(),
+                "github.repos[0].owner",
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_repository_names() {
+        for name in ["bad/name", "bad name", "name\t", "", ".", ".."] {
+            rejects_like_pinned(
+                |value| value["github"]["repos"][0]["name"] = name.into(),
+                "github.repos[0].name",
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_duplicate_repositories() {
+        for mixed_case in [false, true] {
+            rejects_like_pinned(
+                |value| {
+                    let mut duplicate = value["github"]["repos"][0].clone();
+                    if mixed_case {
+                        duplicate["owner"] = "robtand".into();
+                        duplicate["name"] = "TL3-SANDBOX".into();
+                    }
+                    value["github"]["repos"]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(duplicate);
+                },
+                "github.repos[1]",
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_branch_templates() {
+        for template in [
+            "broken",
+            "tl3/{issue}",
+            "tl3/{node}",
+            "tl3/{issue}{node}",
+            "tl3/{issue}-{node}-{other}",
+            "../{issue}-{node}",
+            "tl3/{issue}-{node}.lock",
+        ] {
+            rejects_like_pinned(
+                |value| {
+                    value["github"]["repos"][0]
+                        .as_table_mut()
+                        .unwrap()
+                        .insert("branch_template".into(), template.into());
+                },
+                "github.repos[0].branch_template",
+            );
+        }
+    }
+
+    fn rejects_model_strings(field: &str, values: &[&str]) {
+        for role in [
+            "ingest",
+            "audit",
+            "planner",
+            "maker",
+            "reviewer",
+            "rebaser",
+            "comment_classifier",
+            "writer",
+            "postmortem",
+        ] {
+            for text in values {
+                rejects_like_pinned(
+                    |value| {
+                        let fallback = value["models"]["maker"].clone();
+                        let models = value["models"].as_table_mut().unwrap();
+                        let ladder = models.entry(role).or_insert(fallback);
+                        ladder[0]
+                            .as_table_mut()
+                            .unwrap()
+                            .insert(field.into(), (*text).into());
+                    },
+                    &format!("models.{role}[0].{field}"),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rejects_model_name_whitespace() {
+        rejects_model_strings("name", &[" model", "model ", "\tmodel", "model\n"]);
+    }
+
+    #[test]
+    fn rejects_model_name_control_characters() {
+        rejects_model_strings("name", &["mo\tdel", "mo\ndel", "mo\0del", "mo\u{7f}del"]);
+    }
+
+    #[test]
+    fn rejects_model_family_whitespace() {
+        rejects_model_strings("family", &[" family", "family ", "\tfamily", "family\n"]);
+    }
+
+    #[test]
+    fn rejects_model_family_control_characters() {
+        rejects_model_strings(
+            "family",
+            &["fa\tmily", "fa\nmily", "fa\0mily", "fa\u{7f}mily"],
+        );
+    }
+
+    #[test]
+    fn rejects_model_effort_whitespace() {
+        rejects_model_strings("effort", &[" high", "high ", "\thigh", "high\n"]);
+    }
+
+    #[test]
+    fn rejects_model_effort_control_characters() {
+        rejects_model_strings("effort", &["hi\tgh", "hi\ngh", "hi\0gh", "hi\u{7f}gh"]);
+    }
+
+    #[test]
+    fn rejects_a_planner_without_a_fallback() {
+        rejects_like_pinned(
+            |value| {
+                value["models"]["planner"]
+                    .as_array_mut()
+                    .unwrap()
+                    .truncate(1);
+            },
+            "models.planner",
+        );
+    }
+
+    #[test]
+    fn rejects_a_maker_without_a_second_attempt() {
+        rejects_like_pinned(
+            |value| {
+                value["models"]["maker"].as_array_mut().unwrap().truncate(1);
+            },
+            "models.maker",
+        );
+    }
+
+    #[test]
+    fn rejects_a_maker_without_family_escalation() {
+        for family in ["default", "DEFAULT"] {
+            rejects_like_pinned(
+                |value| {
+                    value["models"]["maker"][1]["family"] = family.into();
+                },
+                "models.maker",
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_reviewers_without_a_different_family_for_every_maker() {
+        for index in [0, 1] {
+            rejects_like_pinned(
+                |value| {
+                    let mut reviewer = value["models"]["maker"][index].clone();
+                    reviewer["family"] = reviewer["family"]
+                        .as_str()
+                        .unwrap()
+                        .to_ascii_uppercase()
+                        .into();
+                    value["models"]
+                        .as_table_mut()
+                        .unwrap()
+                        .insert("reviewer".into(), toml::Value::Array(vec![reviewer]));
+                },
+                "models.reviewer",
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_an_invalid_tl3_store() {
         let error = Settings::parse(&console(&[]), "[store]\nport = \"x\"\n")
             .unwrap_err()
             .to_string();

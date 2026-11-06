@@ -1,0 +1,33 @@
+# Only the projected models and repositories are taken from TL3's file.
+# These fixed defaults let Config::parse reuse its private validators without
+# starting services, inspecting files or validating unrelated TL3 settings.
+# context_tokens uses u32::MAX because the controller's token limit is unused
+# by the console. Model budgets still have to be positive u32 values.
+worktrees_root = "/console-config-validation"
+
+[limits]
+fit_tokens = 100000
+context_tokens = 4294967295
+credit_reserve = 3
+free_rechecks = 3
+w = 1
+
+[github]
+app_credentials_file = "/console-config-validation/github.json"
+
+[github.rob]
+login = "console"
+id = 1
+
+[prismabuild]
+tools_dir = "/console-config-validation"
+container_image = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+[hindsight]
+endpoint = "http://127.0.0.1:1"
+bank = "console"
+
+[status]
+listen = "127.0.0.1:1"
+
+[allowances]

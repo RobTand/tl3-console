@@ -152,9 +152,13 @@ once, so add the line by hand to an existing install and restart the console.
 
 `hide_repos` is optional and defaults to none. See "Hidden repositories" below.
 
-The console reads `tl3.toml` with the pinned TL3's own parser and uses only its
-`[store]` and `[models]` sections and its served repositories, whose branch
-templates name the case file's branch links.
+The console reads `[store]`, `[models]` and `github.repos` through its own
+config boundary. Unknown TL3 keys and unrelated sections are ignored, including
+new keys inside model ladders and repository entries. Missing or mistyped used
+sections still fail startup. The console uses its own login from `console.toml`,
+and repository branch templates name the case file's branch links. TL3's own
+config parser remains strict. Deploy's one-time import of `[console]` uses
+Python's TOML parser, which already accepts additional keys.
 
 ## Hidden repositories
 

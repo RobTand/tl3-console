@@ -275,10 +275,11 @@ fn main() {
         ))
         .unwrap();
     let config =
-        tl3_config::Config::parse(include_str!("../tests/fixtures/tl3-example.toml")).unwrap();
+        tl3_console::config::Tl3::parse(include_str!("../tests/fixtures/tl3-example.toml"))
+            .unwrap();
     let repos: Vec<_> = REPOS
         .iter()
-        .map(|name| tl3_config::Repository {
+        .map(|name| tl3_console::config::Repository {
             name: (*name).into(),
             ..config.github.repos[0].clone()
         })

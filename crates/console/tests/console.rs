@@ -871,7 +871,8 @@ fn refuses_a_conflicting_schema(database: &mut Database, assets: &Path) {
 /// Q53: when the maker's model reports quota, the card names the fallback the
 /// worker will run, as soon as the quota row commits.
 fn cards_follow_the_quota_fallback(settings: &tl3_config::Store, assets: &Path) {
-    let config = tl3_config::Config::parse(include_str!("fixtures/tl3-example.toml")).unwrap();
+    let config =
+        tl3_console::config::Tl3::parse(include_str!("fixtures/tl3-example.toml")).unwrap();
     let console = tl3_console::start(
         TcpListener::bind("127.0.0.1:0").unwrap(),
         tl3_console::Options {
@@ -1243,7 +1244,8 @@ fn hides_repos_from_every_view(assets: &Path) -> Database {
     let shown = 1;
     controller.intake(issue_in(HIDDEN, 42)).unwrap();
     controller.intake(issue_in("tl3-console", 7)).unwrap();
-    let config = tl3_config::Config::parse(include_str!("fixtures/tl3-example.toml")).unwrap();
+    let config =
+        tl3_console::config::Tl3::parse(include_str!("fixtures/tl3-example.toml")).unwrap();
     let start = |hidden: HiddenRepos| {
         tl3_console::start(
             TcpListener::bind("127.0.0.1:0").unwrap(),
@@ -1881,7 +1883,8 @@ fn postmortem_scenarios() {
         SELECT id, 'rec-0123456789abcdef', 1, 'making', 'prompt', 'Retry connection', 'add', '', 'Wait for recovery', 'socket disconnected', 'Recover automatically' FROM tl3_postmortems;
         INSERT INTO tl3_code_grades(node_id, trigger, rubric_version, dimension, grade, fact, revision, recorded_at)
         SELECT '0', 'close', 1, 'reliability', 4, '{"fix_rounds":1}', min(revision), clock_timestamp() FROM tl3_events;"#).unwrap();
-    let config = tl3_config::Config::parse(include_str!("fixtures/tl3-example.toml")).unwrap();
+    let config =
+        tl3_console::config::Tl3::parse(include_str!("fixtures/tl3-example.toml")).unwrap();
     let hidden = HiddenRepos::new(&["RobTand/tl3-sandbox".into()], &config.github.repos).unwrap();
     tl3_store::grant_reader(
         &settings,
