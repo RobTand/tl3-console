@@ -116,7 +116,9 @@ dl380g10:
    TL3's `tl3.toml`. It never overwrites that file afterwards.
 3. It runs the new binary's `check` against the live store, which fails when
    the store's schema is older than the pinned TL3's or disagrees with it. A
-   store that is ahead passes with a warning.
+   store that is ahead passes with a warning. The check also reads the board
+   projection and refuses stored values the pinned TL3 cannot decode, before
+   switching the release or restarting the console.
 4. It installs the release under `~/.local/share/tl3-console/releases/`, points
    `~/.local/share/tl3-console/current` at it, installs
    `deploy/tl3-console.service`, and restarts only `tl3-console.service`.

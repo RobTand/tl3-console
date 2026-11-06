@@ -2731,7 +2731,7 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 [[package]]
 name = "tl3-config"
 version = "0.1.0"
-source = "git+https://github.com/RobTand/trustladderiii?rev=cdacce8f99c28ca8dba8f5f76831b77b4dfcd836#cdacce8f99c28ca8dba8f5f76831b77b4dfcd836"
+source = "git+https://github.com/RobTand/trustladderiii?rev=67f13ea9357d00d31d7f5111b2629a1a373f36b9#67f13ea9357d00d31d7f5111b2629a1a373f36b9"
 dependencies = [
  "glob",
  "serde",
@@ -2765,9 +2765,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tl3-contracts"
+version = "0.1.0"
+source = "git+https://github.com/RobTand/trustladderiii?rev=67f13ea9357d00d31d7f5111b2629a1a373f36b9#67f13ea9357d00d31d7f5111b2629a1a373f36b9"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "tl3-controller"
 version = "0.1.0"
-source = "git+https://github.com/RobTand/trustladderiii?rev=cdacce8f99c28ca8dba8f5f76831b77b4dfcd836#cdacce8f99c28ca8dba8f5f76831b77b4dfcd836"
+source = "git+https://github.com/RobTand/trustladderiii?rev=67f13ea9357d00d31d7f5111b2629a1a373f36b9#67f13ea9357d00d31d7f5111b2629a1a373f36b9"
 dependencies = [
  "chrono",
  "fancy-regex",
@@ -2784,7 +2794,11 @@ dependencies = [
  "socket2",
  "thiserror",
  "tl3-config",
+ "tl3-contracts",
+ "tl3-controller-core",
+ "tl3-delivery",
  "tl3-github",
+ "tl3-harness-core",
  "tl3-kernel",
  "tl3-mergify",
  "tl3-prismabuild",
@@ -2795,9 +2809,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tl3-controller-core"
+version = "0.1.0"
+source = "git+https://github.com/RobTand/trustladderiii?rev=67f13ea9357d00d31d7f5111b2629a1a373f36b9#67f13ea9357d00d31d7f5111b2629a1a373f36b9"
+
+[[package]]
+name = "tl3-delivery"
+version = "0.1.0"
+source = "git+https://github.com/RobTand/trustladderiii?rev=67f13ea9357d00d31d7f5111b2629a1a373f36b9#67f13ea9357d00d31d7f5111b2629a1a373f36b9"
+
+[[package]]
 name = "tl3-github"
 version = "0.1.0"
-source = "git+https://github.com/RobTand/trustladderiii?rev=cdacce8f99c28ca8dba8f5f76831b77b4dfcd836#cdacce8f99c28ca8dba8f5f76831b77b4dfcd836"
+source = "git+https://github.com/RobTand/trustladderiii?rev=67f13ea9357d00d31d7f5111b2629a1a373f36b9#67f13ea9357d00d31d7f5111b2629a1a373f36b9"
 dependencies = [
  "chrono",
  "hex",
@@ -2815,9 +2839,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tl3-harness-core"
+version = "0.1.0"
+source = "git+https://github.com/RobTand/trustladderiii?rev=67f13ea9357d00d31d7f5111b2629a1a373f36b9#67f13ea9357d00d31d7f5111b2629a1a373f36b9"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "tl3-kernel"
 version = "0.1.0"
-source = "git+https://github.com/RobTand/trustladderiii?rev=cdacce8f99c28ca8dba8f5f76831b77b4dfcd836#cdacce8f99c28ca8dba8f5f76831b77b4dfcd836"
+source = "git+https://github.com/RobTand/trustladderiii?rev=67f13ea9357d00d31d7f5111b2629a1a373f36b9#67f13ea9357d00d31d7f5111b2629a1a373f36b9"
 dependencies = [
  "serde",
 ]
@@ -2825,7 +2860,7 @@ dependencies = [
 [[package]]
 name = "tl3-mergify"
 version = "0.1.0"
-source = "git+https://github.com/RobTand/trustladderiii?rev=cdacce8f99c28ca8dba8f5f76831b77b4dfcd836#cdacce8f99c28ca8dba8f5f76831b77b4dfcd836"
+source = "git+https://github.com/RobTand/trustladderiii?rev=67f13ea9357d00d31d7f5111b2629a1a373f36b9#67f13ea9357d00d31d7f5111b2629a1a373f36b9"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -2837,7 +2872,7 @@ dependencies = [
 [[package]]
 name = "tl3-prismabuild"
 version = "0.1.0"
-source = "git+https://github.com/RobTand/trustladderiii?rev=cdacce8f99c28ca8dba8f5f76831b77b4dfcd836#cdacce8f99c28ca8dba8f5f76831b77b4dfcd836"
+source = "git+https://github.com/RobTand/trustladderiii?rev=67f13ea9357d00d31d7f5111b2629a1a373f36b9#67f13ea9357d00d31d7f5111b2629a1a373f36b9"
 dependencies = [
  "reqwest 0.12.28",
  "rustix",
@@ -2850,7 +2885,7 @@ dependencies = [
 [[package]]
 name = "tl3-store"
 version = "0.1.0"
-source = "git+https://github.com/RobTand/trustladderiii?rev=cdacce8f99c28ca8dba8f5f76831b77b4dfcd836#cdacce8f99c28ca8dba8f5f76831b77b4dfcd836"
+source = "git+https://github.com/RobTand/trustladderiii?rev=67f13ea9357d00d31d7f5111b2629a1a373f36b9#67f13ea9357d00d31d7f5111b2629a1a373f36b9"
 dependencies = [
  "postgres",
  "serde",
@@ -2863,7 +2898,7 @@ dependencies = [
 [[package]]
 name = "tl3-worktrees"
 version = "0.1.0"
-source = "git+https://github.com/RobTand/trustladderiii?rev=cdacce8f99c28ca8dba8f5f76831b77b4dfcd836#cdacce8f99c28ca8dba8f5f76831b77b4dfcd836"
+source = "git+https://github.com/RobTand/trustladderiii?rev=67f13ea9357d00d31d7f5111b2629a1a373f36b9#67f13ea9357d00d31d7f5111b2629a1a373f36b9"
 dependencies = [
  "base64 0.22.1",
  "serde",
