@@ -142,6 +142,8 @@ fn deployed_audit_disagreement_projects_the_board() {
     let changed = raw(&settings)
         .execute(
             "UPDATE tl3_world SET value = jsonb_set(value, '{review_stop}', '\"AuditDisagreement\"')
+             || '{\"phase\":{\"Closed\":\"Stopped\"},\"pos\":0,\"effect\":null,\"run\":null,
+                  \"job\":null,\"pool\":false,\"ticket\":null,\"holds\":false}'::jsonb
              WHERE value ? 'review_stop'",
             &[],
         )

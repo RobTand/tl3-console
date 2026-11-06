@@ -74,6 +74,26 @@ cargo_build_script(
     visibility = ["//visibility:public"],
 )
 """)
+    ctx.file("crates/github/BUILD.bazel", """exports_files(["src/checks/verification.rs"])
+""")
+    ctx.file("crates/mergify/BUILD.bazel", """load("@rules_rust//rust:defs.bzl", "rust_library")
+
+rust_library(
+    name = "tl3_mergify",
+    srcs = glob(["src/**/*.rs"]) + ["//crates/github:src/checks/verification.rs"],
+    crate_root = "src/lib.rs",
+    edition = "2024",
+    version = "0.1.0",
+    deps = [
+        "@@rules_rust++crate+crates__base64-0.22.1//:base64",
+        "@@rules_rust++crate+crates__serde-1.0.229//:serde",
+        "@@rules_rust++crate+crates__serde_json-1.0.154//:serde_json",
+        "@@rules_rust++crate+crates__thiserror-2.0.21//:thiserror",
+        "@@rules_rust++crate+crates__tl3-github-0.1.0//:tl3_github",
+    ],
+    visibility = ["//visibility:public"],
+)
+""")
     ctx.file("PINNED_COMMIT", commit + "\n")
 
 tl3_source = repository_rule(

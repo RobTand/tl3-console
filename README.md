@@ -80,7 +80,8 @@ Some details:
 - crate_universe builds TL3's crates from Cargo.lock's git source.
   `tl3-controller`'s build script reads TL3's `workers/` schemas, which sit
   outside the crate, so it runs from `@tl3`: TL3's full tree at the same
-  commit (`tools/bazel/tl3_source.bzl`).
+  commit (`tools/bazel/tl3_source.bzl`). `tl3-mergify` also builds from that
+  tree because it includes verification macros from its sibling GitHub crate.
 
 ## CI and merging
 
