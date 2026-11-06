@@ -118,6 +118,7 @@ impl Executor for Workers {
                     "evidence": {"tool_error": "tool-error-1", "tool": "write", "class": "EROFS"},
                     "report": "The kernel cache directory is mounted read-only, so the cache index could not be written."}),
                 model: Some("default-model".into()),
+                plan_check: None,
             },
             (FIX_ROUND, Role::Review, 1) => Observation::Kernel(Event::Reply {
                 node,
