@@ -435,6 +435,216 @@ mod tests {
         }
     }
 
+    fn rejects_like_pinned(change: impl FnOnce(&mut toml::Value), field: &str) {
+        let mut value: toml::Value = toml::from_str(TL3).unwrap();
+        change(&mut value);
+        let text = toml::to_string(&value).unwrap();
+        let expected = tl3_config::Config::parse(&text).unwrap_err().to_string();
+        assert!(expected.contains(field), "{expected}");
+        let actual = Settings::parse(&console(&[]), &text)
+            .expect_err("console accepted a value rejected by the pinned parser")
+            .to_string();
+        assert_eq!(actual, format!("tl3_config: {expected}"));
+    }
+
+    #[test]
+    fn rejects_empty_served_repositories() {
+        rejects_like_pinned(
+            |value| value["github"]["repos"] = toml::Value::Array(vec![]),
+            "github.repos",
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_repository_owners() {
+        for owner in [
+            "bad/owner",
+            "bad_owner",
+            "bad.owner",
+            " owner",
+            "owner\n",
+            "",
+            ".",
+            "..",
+        ] {
+            rejects_like_pinned(
+                |value| value["github"]["repos"][0]["owner"] = owner.into(),
+                "github.repos[0].owner",
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_repository_names() {
+        for name in ["bad/name", "bad name", "name\t", "", ".", ".."] {
+            rejects_like_pinned(
+                |value| value["github"]["repos"][0]["name"] = name.into(),
+                "github.repos[0].name",
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_duplicate_repositories() {
+        for mixed_case in [false, true] {
+            rejects_like_pinned(
+                |value| {
+                    let mut duplicate = value["github"]["repos"][0].clone();
+                    if mixed_case {
+                        duplicate["owner"] = "robtand".into();
+                        duplicate["name"] = "TL3-SANDBOX".into();
+                    }
+                    value["github"]["repos"]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(duplicate);
+                },
+                "github.repos[1]",
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_branch_templates() {
+        for template in [
+            "broken",
+            "tl3/{issue}",
+            "tl3/{node}",
+            "tl3/{issue}{node}",
+            "tl3/{issue}-{node}-{other}",
+            "../{issue}-{node}",
+            "tl3/{issue}-{node}.lock",
+        ] {
+            rejects_like_pinned(
+                |value| {
+                    value["github"]["repos"][0]
+                        .as_table_mut()
+                        .unwrap()
+                        .insert("branch_template".into(), template.into());
+                },
+                "github.repos[0].branch_template",
+            );
+        }
+    }
+
+    fn rejects_model_strings(field: &str, values: &[&str]) {
+        for role in [
+            "ingest",
+            "audit",
+            "planner",
+            "maker",
+            "reviewer",
+            "rebaser",
+            "comment_classifier",
+            "writer",
+            "postmortem",
+        ] {
+            for text in values {
+                rejects_like_pinned(
+                    |value| {
+                        let fallback = value["models"]["maker"].clone();
+                        let models = value["models"].as_table_mut().unwrap();
+                        let ladder = models.entry(role).or_insert(fallback);
+                        ladder[0]
+                            .as_table_mut()
+                            .unwrap()
+                            .insert(field.into(), (*text).into());
+                    },
+                    &format!("models.{role}[0].{field}"),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rejects_model_name_whitespace() {
+        rejects_model_strings("name", &[" model", "model ", "\tmodel", "model\n"]);
+    }
+
+    #[test]
+    fn rejects_model_name_control_characters() {
+        rejects_model_strings("name", &["mo\tdel", "mo\ndel", "mo\0del", "mo\u{7f}del"]);
+    }
+
+    #[test]
+    fn rejects_model_family_whitespace() {
+        rejects_model_strings("family", &[" family", "family ", "\tfamily", "family\n"]);
+    }
+
+    #[test]
+    fn rejects_model_family_control_characters() {
+        rejects_model_strings(
+            "family",
+            &["fa\tmily", "fa\nmily", "fa\0mily", "fa\u{7f}mily"],
+        );
+    }
+
+    #[test]
+    fn rejects_model_effort_whitespace() {
+        rejects_model_strings("effort", &[" high", "high ", "\thigh", "high\n"]);
+    }
+
+    #[test]
+    fn rejects_model_effort_control_characters() {
+        rejects_model_strings("effort", &["hi\tgh", "hi\ngh", "hi\0gh", "hi\u{7f}gh"]);
+    }
+
+    #[test]
+    fn rejects_a_planner_without_a_fallback() {
+        rejects_like_pinned(
+            |value| {
+                value["models"]["planner"]
+                    .as_array_mut()
+                    .unwrap()
+                    .truncate(1);
+            },
+            "models.planner",
+        );
+    }
+
+    #[test]
+    fn rejects_a_maker_without_a_second_attempt() {
+        rejects_like_pinned(
+            |value| {
+                value["models"]["maker"].as_array_mut().unwrap().truncate(1);
+            },
+            "models.maker",
+        );
+    }
+
+    #[test]
+    fn rejects_a_maker_without_family_escalation() {
+        for family in ["default", "DEFAULT"] {
+            rejects_like_pinned(
+                |value| {
+                    value["models"]["maker"][1]["family"] = family.into();
+                },
+                "models.maker",
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_reviewers_without_a_different_family_for_every_maker() {
+        for index in [0, 1] {
+            rejects_like_pinned(
+                |value| {
+                    let mut reviewer = value["models"]["maker"][index].clone();
+                    reviewer["family"] = reviewer["family"]
+                        .as_str()
+                        .unwrap()
+                        .to_ascii_uppercase()
+                        .into();
+                    value["models"]
+                        .as_table_mut()
+                        .unwrap()
+                        .insert("reviewer".into(), toml::Value::Array(vec![reviewer]));
+                },
+                "models.reviewer",
+            );
+        }
+    }
+
     #[test]
     fn refuses_an_invalid_tl3_store() {
         let error = Settings::parse(&console(&[]), "[store]\nport = \"x\"\n")
