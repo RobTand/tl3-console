@@ -49,7 +49,7 @@ impl Tl3 {
             .map_err(|error: toml::de::Error| invalid("tl3_config", error.message()))?;
         let store = section("store", file.store)?;
         let github: GitHub = section("github", file.github)?;
-        let models = models(file.models, &github.repos)?;
+        let models = validated_models(file.models, &github.repos)?;
         Ok(Self {
             store,
             models,
@@ -87,7 +87,7 @@ fn section<T: serde::de::DeserializeOwned>(name: &str, value: toml::Value) -> cr
 // The pinned validators for GitHub names, templates and model ladders are private
 // to Config. Give that parser only the console's fields plus fixed values for
 // everything else. Config::parse also supplies its implicit model ladders.
-fn models(value: toml::Value, repos: &[Repository]) -> crate::Result<tl3_config::Models> {
+fn validated_models(value: toml::Value, repos: &[Repository]) -> crate::Result<tl3_config::Models> {
     const ROLES: &[&str] = &[
         "ingest",
         "audit",
@@ -138,39 +138,14 @@ fn models(value: toml::Value, repos: &[Repository]) -> crate::Result<tl3_config:
     let text = toml::to_string(&config).map_err(|error| invalid("tl3_config", error))?;
     tl3_config::Config::parse(&text)
         .map(|config| config.models)
-        .map_err(|error| invalid("tl3_config", error))
+        .map_err(|error| {
+            let field = if matches!(&error, tl3_config::Error::Parse(_)) {
+                "tl3_config.models"
+            } else {
+                "tl3_config"
+            };
+            invalid(field, error)
+        })
 }
 
-// These fields never come from TL3's file and never start services or inspect
-// files. The maximum context avoids imposing the controller's unused token
-// limit on the console; model budgets still have to be positive u32 values.
-const VALIDATION_DEFAULTS: &str = r#"
-worktrees_root = "/console-config-validation"
-
-[limits]
-fit_tokens = 100000
-context_tokens = 4294967295
-credit_reserve = 3
-free_rechecks = 3
-w = 1
-
-[github]
-app_credentials_file = "/console-config-validation/github.json"
-
-[github.rob]
-login = "console"
-id = 1
-
-[prismabuild]
-tools_dir = "/console-config-validation"
-container_image = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-
-[hindsight]
-endpoint = "http://127.0.0.1:1"
-bank = "console"
-
-[status]
-listen = "127.0.0.1:1"
-
-[allowances]
-"#;
+const VALIDATION_DEFAULTS: &str = include_str!("validation-defaults.toml");

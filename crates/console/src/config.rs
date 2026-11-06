@@ -435,6 +435,41 @@ mod tests {
         }
     }
 
+    #[test]
+    fn unrelated_tl3_validation_does_not_gate_console() {
+        let mut value: toml::Value = toml::from_str(TL3).unwrap();
+        value["limits"] = "future representation".into();
+        value["console"] = false.into();
+        value["store"]["user"] = 7.into();
+        value["github"]["app_credentials_file"] = 7.into();
+        value["github"]["rob"] = false.into();
+        value["github"]["repos"][0]["installation_id"] = 0.into();
+        value["github"]["repos"][0]
+            .as_table_mut()
+            .unwrap()
+            .insert("protected_paths".into(), 7.into());
+        Settings::parse(&console(&[]), &toml::to_string(&value).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn accepts_valid_repository_names_and_custom_templates() {
+        let mut value: toml::Value = toml::from_str(TL3).unwrap();
+        value["github"]["repos"][0]["owner"] = "Rob-Tand".into();
+        value["github"]["repos"][0]["name"] = "tl3.console_example".into();
+        let template = "feature/node-{node}-issue-{issue}";
+        value["github"]["repos"][0]
+            .as_table_mut()
+            .unwrap()
+            .insert("branch_template".into(), template.into());
+        let text = toml::to_string(&value).unwrap();
+        tl3_config::Config::parse(&text).unwrap();
+        let settings = Settings::parse(&console(&[]), &text).unwrap();
+        assert_eq!(
+            settings.links.branches,
+            vec![("rob-tand/tl3.console_example".into(), template.into())]
+        );
+    }
+
     fn rejects_like_pinned(change: impl FnOnce(&mut toml::Value), field: &str) {
         let mut value: toml::Value = toml::from_str(TL3).unwrap();
         change(&mut value);
