@@ -225,6 +225,7 @@ impl Executor for Workers {
             role: role.into(),
             reply,
             model: Some("default-model".into()),
+            plan_check: None,
         };
         let observation = match (node.0, role, run) {
             (FIX_ROUND, Role::Make, 1 | 2) => reply(

@@ -15,10 +15,29 @@ use tl3_store::{Reader, Store};
 const ROLE: &str = "tl3_console_reader";
 
 fn main() {
+    if std::env::args().any(|arg| arg == "--pinned-migrations") {
+        let mut database = Database::start();
+        pinned_migrations_match_the_pinned_tl3(&mut database);
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--deployment-projection") {
+        deployment_check_rejects_undecodable_board();
+        println!("test deployment_check_rejects_undecodable_board ... ok; no skips");
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--deployed-board") {
+        deployed_audit_disagreement_projects_the_board();
+        println!("test deployed_audit_disagreement_projects_the_board ... ok; no skips");
+        return;
+    }
     if std::env::args().any(|arg| arg == "--postmortems") {
         postmortem_scenarios();
         return;
     }
+    deployment_check_rejects_undecodable_board();
+    println!("test deployment_check_rejects_undecodable_board ... ok");
+    deployed_audit_disagreement_projects_the_board();
+    println!("test deployed_audit_disagreement_projects_the_board ... ok");
     postmortem_scenarios();
     let mut database = Database::start();
     let settings = database.create("console");
@@ -91,7 +110,77 @@ fn main() {
     database.stop();
     hidden_database.stop();
     prompt_database.stop();
-    println!("20 console scenarios passed; no skips");
+    println!("22 console scenarios passed; no skips");
+}
+
+fn deployment_check_rejects_undecodable_board() {
+    let mut database = Database::start();
+    let settings = database.create("console_undecodable_board");
+    let records = tempfile::tempdir().unwrap();
+    let mut controller = open(&settings, records.path());
+    controller.intake(issue(42)).unwrap();
+    drop(controller);
+    assert!(tl3_console::check(&settings).is_ok());
+    assert_eq!(raw(&settings).execute(
+        "UPDATE tl3_world SET value = jsonb_set(value, '{review_stop}', '\"FutureReviewStop\"')
+         WHERE value ? 'review_stop'", &[]).unwrap(), 1);
+    let error = tl3_console::check(&settings)
+        .expect_err("deployment must refuse a board the pinned projection cannot decode");
+    assert!(error.to_string().contains("FutureReviewStop"), "{error}");
+}
+
+// Stored wire value from deployed TL3 67f13ea9, rather than a Rust enum
+// constructor: an older dependency must compile this test and fail decoding.
+fn deployed_audit_disagreement_projects_the_board() {
+    let mut database = Database::start();
+    let settings = database.create("console_deployed_audit");
+    let records = tempfile::tempdir().unwrap();
+    let mut controller = open(&settings, records.path());
+    controller.intake(issue(42)).unwrap();
+    drop(controller);
+    assert!(tl3_console::check(&settings).unwrap().is_empty());
+    let changed = raw(&settings)
+        .execute(
+            "UPDATE tl3_world SET value = jsonb_set(value, '{review_stop}', '\"AuditDisagreement\"')
+             || '{\"phase\":{\"Closed\":\"Stopped\"},\"pos\":0,\"effect\":null,\"run\":null,
+                  \"job\":null,\"pool\":false,\"ticket\":null,\"holds\":false}'::jsonb
+             WHERE value ? 'review_stop'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        changed, 1,
+        "one disposable request carries the deployed review stop"
+    );
+    assert!(tl3_console::check(&settings).unwrap().is_empty());
+    let mut reader = Reader::open(&settings).unwrap();
+    let mut tx = reader.transaction().unwrap();
+    let expected = board::read(&mut tx, now_ms(), None)
+        .expect("deployed AuditDisagreement must decode in the board projection");
+    tx.commit().unwrap();
+    assert!(expected.cards.iter().any(|card| card.issue == 42));
+    let assets = tempfile::tempdir().unwrap();
+    let console = start_console(&settings, assets.path());
+    let mut stream = EventStream::open_with_guard(console.address(), None, Duration::from_secs(20));
+    let event = stream.board_event();
+    assert_eq!(event.name, "snapshot");
+    assert_eq!(event.data["revision"], expected.revision);
+    assert_eq!(
+        event.data["cards"],
+        serde_json::to_value(&expected.cards).unwrap()
+    );
+    let (status, _, body) = get(console.address(), "/api/board");
+    assert_eq!(status, 200);
+    let board: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(board["revision"], expected.revision);
+    assert_eq!(board["cards"], event.data["cards"]);
+    while stream.last_database.is_none() {
+        let event = stream.event();
+        if event.name == "database" {
+            stream.last_database = Some(event.data);
+        }
+    }
+    assert_eq!(stream.last_database.unwrap()["connected"], true);
 }
 
 fn bootstrap() -> Bootstrap {
