@@ -187,7 +187,7 @@ pub struct Links {
 impl Links {
     /// `traces` is the MLflow UI's traces page, such as
     /// `http://192.168.1.107:5033/#/experiments/2/traces`.
-    pub fn new(traces: Option<&str>, repos: &[tl3_config::Repository]) -> crate::Result<Links> {
+    pub fn new(traces: Option<&str>, repos: &[crate::config::Repository]) -> crate::Result<Links> {
         if let Some(traces) = traces
             && (!(traces.starts_with("http://") || traces.starts_with("https://"))
                 || traces.chars().any(|c| c.is_whitespace() || c.is_control()))

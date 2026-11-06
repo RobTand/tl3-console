@@ -17,7 +17,7 @@ pub struct HiddenRepos(BTreeSet<String>);
 impl HiddenRepos {
     /// Every name must be one of the repositories TL3 serves, so that a typo
     /// fails `tl3-console check` instead of hiding nothing.
-    pub fn new(names: &[String], served: &[tl3_config::Repository]) -> crate::Result<Self> {
+    pub fn new(names: &[String], served: &[crate::config::Repository]) -> crate::Result<Self> {
         let served: BTreeSet<String> = served
             .iter()
             .map(|repo| format!("{}/{}", repo.owner, repo.name).to_ascii_lowercase())

@@ -1,0 +1,208 @@
+# Copied from RobTand/trustladderiii crates/config/example.toml at cdacce8f99c28ca8dba8f5f76831b77b4dfcd836.
+# Slice-one config. Paths are absolute; neither ~ nor environment variables expand.
+# Deployment placeholders parse offline. Replace them before Config::load.
+# docs/state-table.md, "Stopping": worktree lifecycle. Deployment starting path.
+worktrees_root = "/srv/tl3/worktrees"
+
+# Q17: set after deployment creates or reconciles the operations issue.
+# [operations]
+# owner = "RobTand"
+# repo = "trustladderiii"
+# issue = 123
+# Exact whole lines from Rob's account. Omit or [] to disable delegated attribution.
+# delegated_attributions = ["(Posted by the TL3 build coordinator under Rob's standing approval.)"]
+
+[store]
+host = "127.0.0.1"
+port = 5432
+database = "tl3"
+user = "tl3"
+connect_timeout_secs = 10
+# Omit for local peer/trust authentication. Runtime alone reads this file.
+# password_file = "/run/tl3/postgres-password"
+
+[limits]
+future_limit = { enabled = true }
+# Q4, docs/state-table.md, "Fit and splits": starting fit and context sizes.
+fit_tokens = 100000
+context_tokens = 150000
+# Q6, docs/state-table.md, "Progress credit": starting reserve and free rebases.
+credit_reserve = 3
+# #416: a starting credit reserve by issue priority ([P0]-[P3] title prefix or
+# P0-P3 label). Off unless set; unlisted priorities keep the kernel's 3.
+# priority_credit_reserve = { P0 = 5, P1 = 5 }
+free_rechecks = 3
+# Q29 amended: W may be 1 to 3; the approved slice-one deployment value is 3.
+w = 1
+# Q39, docs/state-machine.md: simultaneous agent runs.
+agent_pool = 1
+# Q54, docs/state-machine.md: stop for TL3 review instead of retrying the work.
+fail_fast = false
+# #642: postmortems have a separate two-slot lane with no daily limit.
+# #486: each run's wall-clock deadline in seconds; this is the default.
+# postmortem_deadline_secs = 1200
+
+[github]
+# deploy/github-app/README.md: existing JSON with id, slug, pem, webhook_secret.
+# Runtime loads that JSON as tl3_github::AppConfig, never a second TOML secret.
+app_credentials_file = "/home/rob/.config/tl3/github-app.json"
+
+[github.rob]
+# Q2; gh api users/RobTand on 2026-10-30. Match label actors by id, not login.
+login = "RobTand"
+id = 24923402
+
+[[github.repos]]
+# Q13, Q26: slice one serves only Rob's sandbox.
+owner = "RobTand"
+name = "tl3-sandbox"
+# crates/github: GitHub::new takes the installation id separately from AppConfig.
+# Placeholder: replace with the sandbox installation's id after app setup.
+installation_id = 1
+# Optional per-repository conventions. These defaults preserve existing branches.
+# branch_template = "tl3/issue-{issue}-node-{node}"
+# base_branch = "main"
+# Optional additions to the mandatory defaults and global planning.protected_paths.
+# protected_paths = ["CHANGELOG.md", "release/**"]
+# Generated outputs cost a 1,024-token fit allowance; standard leading headers are also detected.
+# Optional admitted generator; outputs still require footprint and protected-path checks.
+# generated_files = ["**/BUILD.bazel"]
+# generator = "bash tools/bazel/generate.sh"
+# Optional startup plus command deadline, 1–600 seconds; unset keeps 120.
+# generator_timeout_s = 300
+# Optional: also run up to this many existing tests that import the change as a regression check.
+# selected_tests = 200
+# Optional repo-wide rules, run as regression checks on every leaf and round.
+# always_tests = ["tests/test_rules.py"]
+# Optional CPU-only PB reservation for Checking and maker run_tests. Default: 1 CPU, 2 GiB.
+# Integers only: cpus 1..16, mem_gb 1..64. No GPU field.
+# test_demand = { cpus = 4, mem_gb = 12 }
+# PrismaBuild: branch_template = "prismabuild-{issue}-tl3-{node}"
+
+[models]
+# docs/stack.md: CLIProxyAPI on beelink. workers/ uses Chat Completions at /v1.
+base_url = "http://192.168.1.120:8317/v1"
+# workers/README.md: key_file is an absolute file path, loaded only at runtime.
+key_file = "/run/tl3/model-key"
+# Q22 and workers/README.md: ordered role ladders use name, effort, budget_tokens.
+# Names below are deployment placeholders, not a claim about the proxy catalog.
+# Replace names and efforts with values served by CLIProxyAPI. Family identifies
+# the underlying model family, independent of proxy aliases.
+# Budgets are starting per-response output limits, not total run budgets.
+# An omitted effort becomes JSON null, as the workers protocol permits.
+ingest = [{ name = "default-model", family = "default", effort = "high", budget_tokens = 32000 }]
+audit = [{ name = "alternate-model", family = "alternate", effort = "high", budget_tokens = 32000 }]
+# A plan that can't meet re-runs with the next model on this ladder.
+planner = [
+    { name = "default-model", family = "default", effort = "high", budget_tokens = 32000 },
+    { name = "alternate-model", family = "alternate", effort = "high", budget_tokens = 32000 },
+]
+# Q22: attempts 1 and 2 share a model; set attempt 2 to its maximum effort/budget.
+# The proxy decides its supported maximum. These sample values need calibration.
+# Attempt 3 uses the strongest available model from a different family.
+# Q22 (Rob, 2026-11-02, #416): attempt 2 escalates to a different model line.
+# Attempts past the ladder use its last rung.
+maker = [
+    { name = "default-model", family = "default", effort = "high", budget_tokens = 32000 },
+    { name = "alternate-model", family = "alternate", effort = "high", budget_tokens = 64000 },
+]
+# Q22: reviewer defaults to the first and last maker rungs. Each attempt selects the first
+# reviewer from a different family than that attempt's maker. An explicit ladder
+# must offer a different-family reviewer for every maker family.
+# reviewer = [
+#     { name = "default-model", family = "default", budget_tokens = 32000 },
+#     { name = "alternate-model", family = "alternate", budget_tokens = 64000 },
+# ]
+# docs/state-table.md, "Rebasing": conflict repair runs an agent.
+rebaser = [{ name = "default-model", family = "default", effort = "high", budget_tokens = 32000 }]
+# Q15: an agent classifies Rob's issue comments.
+comment_classifier = [{ name = "default-model", family = "default", budget_tokens = 8000 }]
+
+[prismabuild]
+# docs/stack.md and Rob's execution policy: published PB tools, not a private copy.
+tools_dir = "/mnt/shared/prismabuild-fleet/repo/tools"
+# harness.Container accepts an image ID or repository@sha256 digest, not a tag
+# or PB's content: reference. Placeholder: replace with a prepared harness image.
+container_image = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+[hindsight]
+# Set a private, owner-only file containing the raw API key when authentication is enabled.
+# The controller reads it for memory delivery and for recall before worker runs.
+# api_key_file = "/run/tl3/hindsight-key"
+# Hindsight listens locally on dl380g10 at 8890; 8888 is celestia's tunnel.
+endpoint = "http://127.0.0.1:8890"
+bank = "tl3"
+
+[status]
+# Q24: read-only page. Ticket #19 sets the deployment LAN address.
+listen = "127.0.0.1:8033"
+
+[console]
+# PRD #327: the operator console. Deploy sets the LAN address and installs the web app.
+listen = "127.0.0.1:8034"
+assets = "/srv/tl3/console"
+
+# docs/state-table.md, "Looks and stalls", and docs/stack.md, "Waits": each
+# upstream gets silence and no-progress allowances. Seconds below are tunable
+# starting values, not agreed numerical rules or work-duration deadlines.
+# Expiry requests a look; only the upstream record can establish a stall/loss.
+[allowances.agent_worker]
+silence_secs = 120
+no_progress_secs = 900
+
+[allowances.prismabuild]
+# docs/stack.md: lease renewals every 30s, loss after 300s. PB owns loss detection.
+silence_secs = 300
+no_progress_secs = 900
+
+[allowances.github_mergify]
+silence_secs = 300
+no_progress_secs = 1800
+
+[allowances.model_calls]
+silence_secs = 120
+no_progress_secs = 900
+
+[allowances.hindsight]
+silence_secs = 60
+no_progress_secs = 120
+
+[workers]
+python = "/srv/tl3/workers/.venv/bin/python"
+runs = "/srv/tl3/worker-runs"
+# The deployment service wrapper exports this as TIKTOKEN_CACHE_DIR.
+# tiktoken_cache_dir = "/srv/tl3/tiktoken"
+command = ["-m", "tl3_workers", "run"]
+# Starts each attempt's supervisor outside tl3d's cgroup, so a restart or
+# deploy leaves runs alive (#372). Empty starts it as tl3d's plain child.
+# launcher = ["/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect", "--slice=tl3-workers.slice"]
+
+[planning]
+# Evidence capabilities of the installed tool. Omit for these defaults, or use
+# tool_capabilities = [] to disable execution evidence. Entries may narrow these
+# lists. A different executor needs an implemented adapter before configuration.
+tool_capabilities = [{ tool = "run_tests", executor = "prismabuild_pytest", runner_features = ["base_head", "repeat", "parallel", "always_tests", "native_threads_1"], artifacts = ["action_key", "cas_receipt", "sha", "logs", "terminal_verdict"], methods = ["red_green", "declared_symptom", "head", "base_head", "subject_observer",  "forced_reproduction.environment", "forced_reproduction.patches"], protected_files = [] }]
+
+# Additions to the built-in defaults, which always apply and needn't be listed (#388).
+protected_paths = [".github/**", ".mergify.yml", ".mergify.yaml", "**/conftest.py", "pytest.ini", ".pytest.ini", "tox.ini", "noxfile.py", "setup.cfg", "pyproject.toml"]
+
+# Calibration seam for future MLflow measurements. Code sums these estimates.
+[planning.overhead_tokens]
+prompt = 5000
+making = 20000
+review = 5000
+
+[allowances.worktrees]
+silence_secs = 120
+no_progress_secs = 900
+
+# Q17: configure the existing pinned "TL3 operations" issue in TL3's own repo.
+# The app must also be installed there. This does not make it a served repo.
+# [github.operations]
+# owner = "RobTand"
+# name = "trustladderiii"
+# installation_id = 2
+# number = 17
+
+[future_controller]
+mode = "new"
