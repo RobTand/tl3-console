@@ -47,28 +47,14 @@ impl Tl3 {
     pub fn parse(text: &str) -> crate::Result<Self> {
         let file: File = toml::from_str(text)
             .map_err(|error: toml::de::Error| invalid("tl3_config", error.message()))?;
-        let config = Self {
-            store: section("store", file.store)?,
-            models: models(file.models).map_err(|error: toml::de::Error| {
-                invalid("tl3_config.models", error.to_string())
-            })?,
-            github: section("github", file.github)?,
-        };
-        for (index, repo) in config.github.repos.iter().enumerate() {
-            for (field, value) in [
-                ("owner", &repo.owner),
-                ("name", &repo.name),
-                ("branch_template", &repo.branch_template),
-            ] {
-                if value.trim().is_empty() {
-                    return Err(invalid(
-                        &format!("tl3_config.github.repos[{index}].{field}"),
-                        "must not be empty",
-                    ));
-                }
-            }
-        }
-        Ok(config)
+        let store = section("store", file.store)?;
+        let github: GitHub = section("github", file.github)?;
+        let models = models(file.models, &github.repos)?;
+        Ok(Self {
+            store,
+            models,
+            github,
+        })
     }
 
     pub(super) fn store(
@@ -98,11 +84,10 @@ fn section<T: serde::de::DeserializeOwned>(name: &str, value: toml::Value) -> cr
         .map_err(|error: toml::de::Error| invalid(&format!("tl3_config.{name}"), error.to_string()))
 }
 
-// The pinned board projection takes tl3_config::Models. Strip unknown keys at
-// this boundary, including each ladder entry, before deserializing that type.
-fn models<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<tl3_config::Models, D::Error> {
+// The pinned validators for GitHub names, templates and model ladders are private
+// to Config. Give that parser only the console's fields plus fixed values for
+// everything else. Config::parse also supplies its implicit model ladders.
+fn models(value: toml::Value, repos: &[Repository]) -> crate::Result<tl3_config::Models> {
     const ROLES: &[&str] = &[
         "ingest",
         "audit",
@@ -114,7 +99,7 @@ fn models<'de, D: serde::Deserializer<'de>>(
         "writer",
         "postmortem",
     ];
-    let mut table = toml::Table::deserialize(deserializer)?;
+    let mut table: toml::Table = section("models", value)?;
     table.retain(|key, _| ROLES.contains(&key) || matches!(key, "base_url" | "key_file"));
     for role in ROLES {
         if let Some(toml::Value::Array(ladder)) = table.get_mut(*role) {
@@ -127,61 +112,65 @@ fn models<'de, D: serde::Deserializer<'de>>(
             }
         }
     }
-    let mut models: tl3_config::Models = toml::Value::Table(table)
-        .try_into()
-        .map_err(|error: toml::de::Error| serde::de::Error::custom(error.to_string()))?;
-    // Preserve the pinned parser's implicit ladders, used by board projection.
-    if models.reviewer.is_empty() {
-        models.reviewer = models
-            .maker
-            .first()
-            .into_iter()
-            .chain(models.maker.last())
-            .cloned()
-            .collect();
-    }
-    if models.writer.is_empty() {
-        models.writer = models.ingest.clone();
-    }
-    if models.postmortem.is_empty() {
-        models.postmortem = models
-            .reviewer
-            .first()
-            .into_iter()
-            .chain(models.writer.first())
-            .cloned()
-            .collect();
-    }
-    for (role, ladder) in [
-        ("ingest", &models.ingest),
-        ("audit", &models.audit),
-        ("planner", &models.planner),
-        ("maker", &models.maker),
-        ("reviewer", &models.reviewer),
-        ("rebaser", &models.rebaser),
-        ("comment_classifier", &models.comment_classifier),
-        ("writer", &models.writer),
-        ("postmortem", &models.postmortem),
-    ] {
-        if ladder.is_empty() {
-            return Err(serde::de::Error::custom(format!(
-                "models.{role}: must contain at least one model"
-            )));
-        }
-        for (index, model) in ladder.iter().enumerate() {
-            if model.name.trim().is_empty()
-                || model.family.trim().is_empty()
-                || model
-                    .effort
-                    .as_ref()
-                    .is_some_and(|effort| effort.trim().is_empty())
-                || model.budget_tokens == 0
-            {
-                return Err(serde::de::Error::custom(format!(
-                    "models.{role}[{index}]: name, family and effort must not be empty; budget_tokens must be positive"
-                )));
-            }
-        }
-    }
-    Ok(models)
+    let mut config: toml::Table = toml::from_str(VALIDATION_DEFAULTS)
+        .expect("the console's fixed validation context is valid TOML");
+    config.insert("models".into(), toml::Value::Table(table));
+    let repositories = repos
+        .iter()
+        .map(|repo| {
+            toml::Value::Table(toml::Table::from_iter([
+                ("owner".into(), repo.owner.clone().into()),
+                ("name".into(), repo.name.clone().into()),
+                (
+                    "branch_template".into(),
+                    repo.branch_template.clone().into(),
+                ),
+                ("installation_id".into(), toml::Value::Integer(1)),
+            ]))
+        })
+        .collect();
+    config
+        .get_mut("github")
+        .unwrap()
+        .as_table_mut()
+        .unwrap()
+        .insert("repos".into(), toml::Value::Array(repositories));
+    let text = toml::to_string(&config).map_err(|error| invalid("tl3_config", error))?;
+    tl3_config::Config::parse(&text)
+        .map(|config| config.models)
+        .map_err(|error| invalid("tl3_config", error))
 }
+
+// These fields never come from TL3's file and never start services or inspect
+// files. The maximum context avoids imposing the controller's unused token
+// limit on the console; model budgets still have to be positive u32 values.
+const VALIDATION_DEFAULTS: &str = r#"
+worktrees_root = "/console-config-validation"
+
+[limits]
+fit_tokens = 100000
+context_tokens = 4294967295
+credit_reserve = 3
+free_rechecks = 3
+w = 1
+
+[github]
+app_credentials_file = "/console-config-validation/github.json"
+
+[github.rob]
+login = "console"
+id = 1
+
+[prismabuild]
+tools_dir = "/console-config-validation"
+container_image = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+[hindsight]
+endpoint = "http://127.0.0.1:1"
+bank = "console"
+
+[status]
+listen = "127.0.0.1:1"
+
+[allowances]
+"#;
